@@ -1,9 +1,0 @@
-/home/openclaw/claudecode-workspace/spring-batch-cleanup-job/src/main/java/com/example/cleanupjob/CleanupJobApplication.java
-/home/openclaw/claudecode-workspace/spring-batch-cleanup-job/src/main/java/com/example/cleanupjob/job/CleanupJobConfig.java
-/home/openclaw/claudecode-workspace/spring-batch-cleanup-job/src/main/java/com/example/cleanupjob/model/Post.java
-/home/openclaw/claudecode-workspace/spring-batch-cleanup-job/src/main/java/com/example/cleanupjob/processor/SoftDeleteProcessor.java
-/home/openclaw/claudecode-workspace/spring-batch-cleanup-job/src/main/java/com/example/cleanupjob/reader/DeletedPostReader.java
-/home/openclaw/claudecode-workspace/spring-batch-cleanup-job/src/main/java/com/example/cleanupjob/reader/UnpublishedPostReader.java
-/home/openclaw/claudecode-workspace/spring-batch-cleanup-job/src/main/java/com/example/cleanupjob/repository/PostRepository.java
-/home/openclaw/claudecode-workspace/spring-batch-cleanup-job/src/main/java/com/example/cleanupjob/writer/BatchSoftDeleteWriter.java
-/home/openclaw/claudecode-workspace/spring-batch-cleanup-job/src/main/java/com/example/cleanupjob/writer/ErrorSimulatingWriter.java
