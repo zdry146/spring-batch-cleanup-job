@@ -1,0 +1,9 @@
+com/example/cleanupjob/job/CleanupJobConfig.class
+com/example/cleanupjob/model/Post.class
+com/example/cleanupjob/repository/PostRepository.class
+com/example/cleanupjob/CleanupJobApplication.class
+com/example/cleanupjob/processor/SoftDeleteProcessor.class
+com/example/cleanupjob/writer/BatchSoftDeleteWriter.class
+com/example/cleanupjob/writer/ErrorSimulatingWriter.class
+com/example/cleanupjob/reader/UnpublishedPostReader.class
+com/example/cleanupjob/reader/DeletedPostReader.class

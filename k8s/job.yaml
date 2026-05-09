@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cleanup-manual
+  namespace: batch-jobs
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: cleanup-batch
+        image: cleanup-batch:2.0.1
+        imagePullPolicy: IfNotPresent
+        env:
+        # Database configuration
+        - name: DB_HOST
+          value: "192.168.232.128"
+        - name: DB_USERNAME
+          value: "postgres"
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: db-credentials
+              key: password
+
+        # Error injection for testing (default: no error)
+        # Set ERROR_INJECTION_STEP1 false to inject error in Step 1
+        # Set ERROR_INJECTION_STEP2 true to inject error in Step 2
+        - name: ERROR_INJECTION_STEP1
+          value: "false"
+        - name: ERROR_INJECTION_STEP2
+          value: "false"
+        # ERROR_TYPE: PERMANENT (fails after retries) or TRANSIENT (recovers on retry)
+        - name: ERROR_TYPE
+          value: "PERMANENT"
+
