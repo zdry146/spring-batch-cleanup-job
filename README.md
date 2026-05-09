@@ -167,7 +167,7 @@ kubectl delete namespace batch-jobs
 
 ```bash
 # Insert test data
-PGPASSWORD=postgres psql -h 192.168.232.128 -U postgres -d testdb -f scripts/insert-test-data.sql
+PGPASSWORD=<your_password> psql -h 192.168.232.128 -U postgres -d testdb -f scripts/insert-test-data.sql
 
 # Run job and verify
 ./scripts/run-and-verify.sh
@@ -220,17 +220,17 @@ sudo systemctl reload postgresql
 If Spring Batch tables have schema mismatch, drop and recreate:
 
 ```bash
-PGPASSWORD=postgres psql -h 192.168.232.128 -U postgres -d testdb -c "DROP TABLE IF EXISTS batch_step_execution_context, batch_step_execution, batch_job_execution_params, batch_job_execution_context, batch_job_instance, batch_job_execution CASCADE;"
+PGPASSWORD=<your_password> psql -h 192.168.232.128 -U postgres -d testdb -c "DROP TABLE IF EXISTS batch_step_execution_context, batch_step_execution, batch_job_execution_params, batch_job_execution_context, batch_job_instance, batch_job_execution CASCADE;"
 ```
 
 ### Check Database Tables
 
 ```bash
-PGPASSWORD=postgres psql -h 192.168.232.128 -U postgres -d testdb -c "\dt"
+PGPASSWORD=<your_password> psql -h 192.168.232.128 -U postgres -d testdb -c "\dt"
 ```
 
 ### Verify Posts Table
 
 ```bash
-PGPASSWORD=postgres psql -h 192.168.232.128 -U postgres -d testdb -c "SELECT COUNT(*) FROM posts WHERE is_deleted = true;"
+PGPASSWORD=<your_password> psql -h 192.168.232.128 -U postgres -d testdb -c "SELECT COUNT(*) FROM posts WHERE is_deleted = true;"
 ```

@@ -5,13 +5,25 @@ set -e
 
 NAMESPACE="batch-jobs"
 JOB_NAME="cleanup-manual"
-DB_HOST="192.168.232.128"
+DOCKER_IMAGE="cleanup-batch:1.0.0"
+DB_HOST="${DB_HOST:-192.168.232.128}"
+DB_DATABASE="${DB_DATABASE:-testdb}"
+DB_USERNAME="${DB_USERNAME:-postgres}"
+DB_PASSWORD="${DB_PASSWORD:-postgres}"
+
+psql_query() {
+    PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USERNAME -d $DB_DATABASE -t -c "$1"
+}
+
+psql_exec() {
+    PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USERNAME -d $DB_DATABASE
+}
 
 echo "=============================================="
 echo "1. Inserting test data"
 echo "=============================================="
 
-PGPASSWORD=postgres psql -h $DB_HOST -U postgres -d testdb << 'EOF'
+psql_exec << 'EOF'
 -- Insert unpublished old posts (for cleanupStep - Step 1)
 INSERT INTO posts (author_name, content, title, view_count, like_count, is_published, is_deleted, created_at, updated_at)
 SELECT
@@ -41,16 +53,10 @@ echo "2. Checking data before job execution"
 echo "=============================================="
 
 echo "Unpublished old posts:"
-PGPASSWORD=postgres psql -h $DB_HOST -U postgres -d testdb -t -c "
-SELECT COUNT(*) FROM posts
-WHERE is_published = false AND is_deleted = false
-AND created_at < NOW() - INTERVAL '30 days';
-"
+psql_query "SELECT COUNT(*) FROM posts WHERE is_published = false AND is_deleted = false AND created_at < NOW() - INTERVAL '30 days';"
 
 echo "Already deleted posts:"
-PGPASSWORD=postgres psql -h $DB_HOST -U postgres -d testdb -t -c "
-SELECT COUNT(*) FROM posts WHERE is_deleted = true;
-"
+psql_query "SELECT COUNT(*) FROM posts WHERE is_deleted = true;"
 
 echo ""
 echo "=============================================="
@@ -86,16 +92,10 @@ echo "7. Data after job execution"
 echo "=============================================="
 
 echo "Unpublished old posts (should be 0 or reduced):"
-PGPASSWORD=postgres psql -h $DB_HOST -U postgres -d testdb -t -c "
-SELECT COUNT(*) FROM posts
-WHERE is_published = false AND is_deleted = false
-AND created_at < NOW() - INTERVAL '30 days';
-"
+psql_query "SELECT COUNT(*) FROM posts WHERE is_published = false AND is_deleted = false AND created_at < NOW() - INTERVAL '30 days';"
 
 echo "Already deleted posts (should include newly deleted):"
-PGPASSWORD=postgres psql -h $DB_HOST -U postgres -d testdb -t -c "
-SELECT COUNT(*) FROM posts WHERE is_deleted = true;
-"
+psql_query "SELECT COUNT(*) FROM posts WHERE is_deleted = true;"
 
 echo ""
 echo "=============================================="

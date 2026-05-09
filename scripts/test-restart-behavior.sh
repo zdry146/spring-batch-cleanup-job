@@ -8,7 +8,20 @@
 set -e
 
 NAMESPACE="batch-jobs"
-DB_HOST="192.168.232.128"
+JOB_NAME="cleanup-manual"
+DOCKER_IMAGE="cleanup-batch:1.0.0"
+DB_HOST="${DB_HOST:-192.168.232.128}"
+DB_DATABASE="${DB_DATABASE:-testdb}"
+DB_USERNAME="${DB_USERNAME:-postgres}"
+DB_PASSWORD="${DB_PASSWORD:-postgres}"
+
+psql_query() {
+    PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USERNAME -d $DB_DATABASE -t -c "$1"
+}
+
+psql_exec() {
+    PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USERNAME -d $DB_DATABASE
+}
 
 echo "=============================================="
 echo "Spring Batch Restart Behavior Test"
@@ -28,7 +41,7 @@ echo "TEST 1: Normal Execution"
 echo "=============================================="
 
 echo "Preparing test data..."
-PGPASSWORD=postgres psql -h $DB_HOST -U postgres -d testdb << 'EOF'
+psql_exec << 'EOF'
 DELETE FROM posts WHERE title LIKE 'Restart Test%';
 INSERT INTO posts (author_name, content, title, view_count, like_count, is_published, is_deleted, created_at, updated_at)
 SELECT 'Tester', 'Content', 'Restart Test Post ' || i, 0, 0, false, false,
@@ -38,11 +51,11 @@ UPDATE posts SET is_deleted = true, updated_at = NOW() WHERE title LIKE 'Restart
 EOF
 
 echo "Running job..."
-kubectl delete job cleanup-manual -n $NAMESPACE 2>/dev/null || true
+kubectl delete job $JOB_NAME -n $NAMESPACE 2>/dev/null || true
 kubectl apply -f k8s/job.yaml
 sleep 15
 
-POD_NAME=$(kubectl get pods -n $NAMESPACE -l job-name=cleanup-manual -o name | head -1)
+POD_NAME=$(kubectl get pods -n $NAMESPACE -l job-name=$JOB_NAME -o name | head -1)
 echo "Job completed. Check logs with:"
 echo "kubectl logs -n $NAMESPACE $POD_NAME"
 
@@ -60,10 +73,10 @@ echo "Step 2 will NOT run because Step 1 failed."
 echo ""
 echo "To run this test:"
 echo "1. Set ERROR_INJECTION_STEP1=true in k8s/job.yaml"
-echo "2. kubectl delete job cleanup-manual -n $NAMESPACE"
+echo '2. kubectl delete job $JOB_NAME -n $NAMESPACE'
 echo "3. kubectl apply -f k8s/job.yaml"
 echo "4. Wait ~30 seconds for retries"
-echo "5. Check: kubectl get job -n $NAMESPACE (should be Failed)"
+echo '5. Check: kubectl get job -n $NAMESPACE (should be Failed)'
 echo ""
 
 # ============================================================================
@@ -79,9 +92,9 @@ echo "Step 2 will run normally after Step 1 recovers."
 echo ""
 echo "To run this test:"
 echo "1. Set ERROR_INJECTION_STEP1=true and ERROR_TYPE=TRANSIENT in k8s/job.yaml"
-echo "2. kubectl delete job cleanup-manual -n $NAMESPACE"
+echo "2. kubectl delete job $JOB_NAME -n $NAMESPACE"
 echo "3. kubectl apply -f k8s/job.yaml"
-echo "4. Watch logs: kubectl logs -n $NAMESPACE -l job-name=cleanup-manual -f"
+echo "4. Watch logs: kubectl logs -n $NAMESPACE -l job-name=$JOB_NAME -f"
 echo "5. You should see retry messages and eventually COMPLETED status"
 echo ""
 
@@ -100,7 +113,7 @@ echo "4. Restart job - Step 1 does NOT re-run!"
 echo ""
 echo "To run this test:"
 echo "1. Set ERROR_INJECTION_STEP2=true in k8s/job.yaml"
-echo "2. kubectl delete job cleanup-manual -n $NAMESPACE"
+echo "2. kubectl delete job $JOB_NAME -n $NAMESPACE"
 echo "3. kubectl apply -f k8s/job.yaml"
 echo "   - Step 1 completes successfully"
 echo "   - Step 2 fails"
@@ -110,7 +123,7 @@ echo "   - Step 1 is SKIPPED (already committed)"
 echo "   - Step 2 runs and completes"
 echo ""
 echo "Check job execution history:"
-echo "kubectl get job cleanup-manual -n $NAMESPACE -o yaml"
+echo "kubectl get job $JOB_NAME -n $NAMESPACE -o yaml"
 echo ""
 
 # ============================================================================
@@ -121,19 +134,19 @@ echo "Manual Test Commands"
 echo "=============================================="
 echo ""
 echo "# Build and deploy (after code changes)"
-echo "mvn clean package -DskipTests && docker build -t cleanup-batch:1.0.0 ."
+echo "mvn clean package -DskipTests && docker build -t $DOCKER_IMAGE ."
 echo ""
 echo "# Run normal job"
 echo "kubectl apply -f k8s/job.yaml"
 echo ""
 echo "# View logs"
-echo "kubectl logs -n $NAMESPACE -l job-name=cleanup-manual -f"
+echo "kubectl logs -n $NAMESPACE -l job-name=$JOB_NAME -f"
 echo ""
 echo "# Check job status"
-echo "kubectl get job cleanup-manual -n $NAMESPACE"
+echo "kubectl get job $JOB_NAME -n $NAMESPACE"
 echo ""
 echo "# Delete job"
-echo "kubectl delete job cleanup-manual -n $NAMESPACE"
+echo "kubectl delete job $JOB_NAME -n $NAMESPACE"
 echo ""
 
 echo "=============================================="
