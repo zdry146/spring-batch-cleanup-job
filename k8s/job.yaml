@@ -25,7 +25,7 @@ spec:
 
         # Error injection for testing (default: no error)
         # Set ERROR_INJECTION_STEP1 false to inject error in Step 1
-        # Set ERROR_INJECTION_STEP2 true to inject error in Step 2
+        # Set ERROR_INJECTION_STEP2 false to inject error in Step 2
         - name: ERROR_INJECTION_STEP1
           value: "false"
         - name: ERROR_INJECTION_STEP2

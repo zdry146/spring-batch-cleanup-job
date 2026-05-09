@@ -145,8 +145,24 @@ kubectl delete namespace batch-jobs
 | Variable | Default | Description |
 |----------|---------|-------------|
 | DB_HOST | 192.168.232.128 | PostgreSQL host |
+| DB_DATABASE | testdb | Database name |
 | DB_USERNAME | postgres | Database user |
 | DB_PASSWORD | (from K8s Secret) | Database password |
+
+All variables can be overridden before running scripts or applying Kubernetes manifests:
+
+```bash
+# Using environment variables
+export DB_HOST=192.168.232.128
+export DB_DATABASE=testdb
+export DB_USERNAME=postgres
+export DB_PASSWORD=your_password
+
+# Or inline when running scripts
+DB_PASSWORD=your_password ./scripts/run-and-verify.sh
+```
+
+For Kubernetes, update the values in `k8s/secret.yaml` and `k8s/job.yaml` (or `k8s/cronjob.yaml`) to match your environment.
 
 ### Batch Configuration
 
@@ -173,15 +189,32 @@ PGPASSWORD=<your_password> psql -h 192.168.232.128 -U postgres -d testdb -f scri
 ./scripts/run-and-verify.sh
 ```
 
-### Test Restart Behavior
+### Test Error Injection (Automated Test)
+
+```bash
+./scripts/test-error-injection.sh
+```
+
+This script runs **fully automated tests** that inject errors and verify retry/restart behavior:
+1. **Step 1 Permanent Error** — injects an error in Step 1, verifies retry behavior (retries 3 times then fails)
+2. **Step 2 Failure + Restart** — Step 1 succeeds and commits, Step 2 fails; on restart, Step 1 is skipped (already committed)
+
+The script automatically rebuilds the Docker image with error injection enabled/disabled as needed.
+
+### Test Restart Behavior (Reference Script)
 
 ```bash
 ./scripts/test-restart-behavior.sh
 ```
 
-This demonstrates Spring Batch restart semantics:
-- Step 1 commits its data
-- If Step 2 fails and we restart, Step 1 does NOT re-run
+This script is a **reference/guidance script** — it does NOT run automated tests. Instead, it documents how Spring Batch restart semantics work and provides step-by-step manual instructions for testing:
+
+- **TEST 1** (auto-runs): Normal job execution
+- **TEST 2** (manual): Inject permanent error in Step 1, verify retries then failure
+- **TEST 3** (manual): Inject transient error in Step 1, verify recovery on retry
+- **TEST 4** (manual): Inject error in Step 2, restart job, verify Step 1 is skipped
+
+For fully automated restart testing, use `test-error-injection.sh` instead.
 
 ### Manual Test Commands
 
