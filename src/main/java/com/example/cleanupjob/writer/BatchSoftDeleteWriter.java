@@ -15,6 +15,10 @@ public class BatchSoftDeleteWriter implements ItemWriter<Post> {
     @PersistenceContext
     private EntityManager entityManager;
 
+    public void setEntityManager(EntityManager entityManager) {
+        this.entityManager = entityManager;
+    }
+
     @Override
     public void write(Chunk<? extends Post> chunk) throws Exception {
         List<? extends Post> posts = chunk.getItems();

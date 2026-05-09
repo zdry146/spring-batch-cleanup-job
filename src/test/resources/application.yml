@@ -1,0 +1,16 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+  batch:
+    jdbc:
+      initialize-schema: embedded
+
+DB_HOST: localhost
+DB_DATABASE: testdb
+DB_USERNAME: sa
+DB_PASSWORD:

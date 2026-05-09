@@ -8,29 +8,27 @@ Kubernetes-deployable Spring Batch job for soft-deleting unpublished posts older
 spring-batch-cleanup-job/
 ├── pom.xml                          # Maven configuration
 ├── Dockerfile                       # Docker image build
-├── scripts/                         # Test scripts
+├── scripts/
 │   ├── insert-test-data.sql        # Insert test data
-│   ├── run-and-verify.sh           # Run job and verify
-│   └── test-restart-behavior.sh   # Test restart semantics
-├── src/main/
-│   ├── java/com/example/cleanupjob/
-│   │   ├── CleanupJobApplication.java
-│   │   ├── model/Post.java
-│   │   ├── repository/PostRepository.java
-│   │   ├── reader/
-│   │   │   ├── UnpublishedPostReader.java
-│   │   │   └── DeletedPostReader.java
-│   │   ├── processor/SoftDeleteProcessor.java
-│   │   ├── writer/BatchSoftDeleteWriter.java
-│   │   └── job/CleanupJobConfig.java
-│   └── resources/
-│       ├── application.yml          # Configuration
-│       └── schema.sql              # DB schema reference
+│   ├── run-and-verify.sh           # Run job and verify (E2E)
+│   ├── test-error-injection.sh     # Automated error/retry test (E2E)
+│   └── test-restart-behavior.sh    # Restart semantics reference
+├── src/main/java/com/example/cleanupjob/
+│   ├── CleanupJobApplication.java   # Spring Boot entry point
+│   ├── job/                        # Job and step configuration
+│   ├── model/                      # JPA entity
+│   ├── processor/                  # Item processor
+│   ├── reader/                     # Item readers
+│   ├── repository/                 # JPA repository
+│   └── writer/                     # Item writers
+├── src/main/resources/
+│   └── application.yml             # Configuration
+├── src/test/java/                  # Unit tests
 └── k8s/
-    ├── namespace.yaml               # Kubernetes namespace
-    ├── secret.yaml                  # DB credentials secret
-    ├── cronjob.yaml                 # Scheduled job (midnight daily)
-    └── job.yaml                     # Manual trigger job
+    ├── namespace.yaml              # Kubernetes namespace
+    ├── secret.yaml                 # DB credentials
+    ├── cronjob.yaml                # Scheduled job
+    └── job.yaml                    # Manual trigger job
 ```
 
 ## Job Steps
