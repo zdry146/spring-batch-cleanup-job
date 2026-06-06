@@ -81,7 +81,9 @@ In **`k8s/cronjob.yaml`** and **`k8s/job.yaml`** (apply the same diff to both):
   `image: crpi-e2h2rfj3kunrwe5n.cn-hangzhou.personal.cr.aliyuncs.com/mike-docker-registry/spring-batch-cleanup-job:latest`.
 - Change `imagePullPolicy: IfNotPresent` to `Always` (so remote updates are
   picked up regardless of tag).
-- Add to the pod spec:
+- Add to the **pod spec** (sibling of `containers:` and `restartPolicy:`,
+  not inside any container — `imagePullSecrets` is a pod-level field in
+  Kubernetes):
 
   ```yaml
   imagePullSecrets:

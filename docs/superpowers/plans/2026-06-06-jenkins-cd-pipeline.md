@@ -45,20 +45,24 @@ Change 2 — replace the image pull policy (line currently reads `imagePullPolic
             imagePullPolicy: Always
 ```
 
-Change 3 — add `imagePullSecrets` as a sibling key inside the same container spec (not the pod spec — Kubernetes allows both, but the container-level form is more common):
+Change 3 — add `imagePullSecrets` to the **pod spec** as a sibling of `containers:` and `restartPolicy:` (NOT inside the container — `imagePullSecrets` is a pod-level field in Kubernetes):
 ```yaml
-            imagePullSecrets:
-              - name: aliyun-registry-cred
+          restartPolicy: OnFailure
+          imagePullSecrets:
+            - name: aliyun-registry-cred
+          containers:
 ```
 
-The resulting container block should look like:
+The resulting pod-spec block should look like:
 ```yaml
+        spec:
+          restartPolicy: OnFailure
+          imagePullSecrets:
+            - name: aliyun-registry-cred
           containers:
           - name: cleanup-batch
             image: crpi-e2h2rfj3kunrwe5n.cn-hangzhou.personal.cr.aliyuncs.com/mike-docker-registry/spring-batch-cleanup-job:latest
             imagePullPolicy: Always
-            imagePullSecrets:
-              - name: aliyun-registry-cred
             env:
             - name: DB_HOST
               value: "192.168.232.128"
@@ -71,7 +75,7 @@ The resulting container block should look like:
                   key: password
 ```
 
-(Indentation in the file is 10 spaces for `containers:` items. Preserve that exactly.)
+(Indentation in the file is 10 spaces for `containers:` items and 10 spaces for the new `imagePullSecrets` key as a sibling of `containers:`. Preserve that exactly.)
 
 - [ ] **Step 2: Validate the file**
 
@@ -106,15 +110,17 @@ git commit -m "k8s/cronjob: pull image from Aliyun registry with imagePullSecret
 
 - [ ] **Step 1: Edit the file**
 
-Apply the same three changes to `k8s/job.yaml`. The resulting container block should look like:
+Apply the same three changes to `k8s/job.yaml`. The resulting pod-spec block should look like:
 
 ```yaml
+      spec:
+        restartPolicy: OnFailure
+        imagePullSecrets:
+          - name: aliyun-registry-cred
         containers:
         - name: cleanup-batch
           image: crpi-e2h2rfj3kunrwe5n.cn-hangzhou.personal.cr.aliyuncs.com/mike-docker-registry/spring-batch-cleanup-job:latest
           imagePullPolicy: Always
-          imagePullSecrets:
-            - name: aliyun-registry-cred
           env:
           # Database configuration
           - name: DB_HOST
@@ -139,7 +145,7 @@ Apply the same three changes to `k8s/job.yaml`. The resulting container block sh
             value: "PERMANENT"
 ```
 
-(Indentation in `k8s/job.yaml` is 8 spaces for `containers:` items. Preserve that exactly.)
+(Indentation in `k8s/job.yaml` is 8 spaces for `containers:` items and 8 spaces for the new `imagePullSecrets` key as a sibling of `containers:`. Preserve that exactly.)
 
 - [ ] **Step 2: Validate the file**
 
