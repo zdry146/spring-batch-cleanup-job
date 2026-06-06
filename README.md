@@ -40,6 +40,16 @@ This job has two steps:
 
 If `processDeletedPostsStep` fails and the job is restarted, `cleanupStep` will NOT re-run because it has already committed (chunk-level checkpointing).
 
+### Restart Semantics
+
+The job uses a date-based `JobParametersIncrementer` (see `DateJobParametersIncrementer`) that adds `run.date=YYYY-MM-DD` to every launch. This gives us:
+
+- **Daily CronJob runs**: each calendar day is a distinct `JobInstance`.
+- **Manual restart same day** (`kubectl delete job && kubectl apply` after a failure): the new pod reuses the same `JobInstance`; Spring Batch resumes from the last committed chunk, so a completed step is skipped and a failed step restarts.
+- **Manual restart next day**: a fresh `JobInstance`.
+
+The previous design used `RunIdIncrementer`, which assigned a fresh `run.id` to every launch — that made "restart" actually a fresh run and defeated Spring Batch's restart checkpointing.
+
 ## Build & Deploy
 
 ### 1. Build Maven Project

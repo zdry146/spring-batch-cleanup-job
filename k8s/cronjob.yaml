@@ -7,6 +7,7 @@ spec:
   schedule: "0 0 * * *"
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
+  concurrencyPolicy: Forbid
   jobTemplate:
     spec:
       template:
@@ -14,7 +15,7 @@ spec:
           restartPolicy: OnFailure
           containers:
           - name: cleanup-batch
-            image: cleanup-batch:2.0.1
+            image: cleanup-batch:1.0.0
             imagePullPolicy: IfNotPresent
             env:
             - name: DB_HOST
