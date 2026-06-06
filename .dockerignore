@@ -1,0 +1,17 @@
+.git/
+.github/
+.gitignore
+
+.idea/
+.vscode/
+*.iml
+.classpath
+.project
+.settings/
+
+docs/
+
+target/test-classes/
+target/surefire-reports/
+target/maven-archiver/
+target/maven-status/

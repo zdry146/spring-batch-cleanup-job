@@ -36,7 +36,6 @@ spring-batch-cleanup-job/
 ├── Dockerfile                           # Docker image build (JRE 21)
 ├── AGENTS.md                            # Agent-facing notes (Jenkins, env vars)
 ├── README.md                            # This file
-├── .github/workflows/ci.yml             # PR-only build + test
 ├── jenkins/
 │   └── combined-pipeline-scm.groovy     # Source of truth for the 3 Jenkins jobs
 ├── k8s/
