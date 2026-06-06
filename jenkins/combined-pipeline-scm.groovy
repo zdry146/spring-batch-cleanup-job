@@ -7,18 +7,18 @@ pipeline {
     parameters {
         choice(
             name: 'MODE',
-            choices: ['ci', 'cd'],
-            description: 'ci = build+test+push image, cd = deploy image to k8s'
+            choices: ['ci', 'cd', 'both'],
+            description: 'ci = build+test+push, cd = deploy to k8s, both = ci then cd in one run'
         )
         choice(
             name: 'IMAGE_TAG',
             choices: ['latest', '1.0.0'],
-            description: 'Image tag to deploy (CD mode only)'
+            description: 'Image tag to deploy (cd mode only; ignored when MODE=both or ci)'
         )
         string(
             name: 'NAMESPACE',
             defaultValue: 'batch-jobs',
-            description: 'Kubernetes namespace (CD mode only)'
+            description: 'Kubernetes namespace (cd mode only)'
         )
     }
     environment {
@@ -30,13 +30,11 @@ pipeline {
     }
     stages {
         stage('Build & test') {
-            when { expression { params.MODE == 'ci' } }
-            steps {
-                sh 'mvn -B clean verify'
-            }
+            when { expression { params.MODE == 'ci' || params.MODE == 'both' } }
+            steps { sh 'mvn -B clean verify' }
         }
         stage('Determine image version') {
-            when { expression { params.MODE == 'ci' } }
+            when { expression { params.MODE == 'ci' || params.MODE == 'both' } }
             steps {
                 script {
                     env.IMAGE_VERSION = sh(
@@ -48,7 +46,7 @@ pipeline {
             }
         }
         stage('Build & push image') {
-            when { expression { params.MODE == 'ci' } }
+            when { expression { params.MODE == 'ci' || params.MODE == 'both' } }
             steps {
                 sh """
                 set -euo pipefail
@@ -60,8 +58,18 @@ pipeline {
             }
         }
 
+        stage('Resolve deploy tag') {
+            when { expression { params.MODE == 'cd' || params.MODE == 'both' } }
+            steps {
+                script {
+                    env.DEPLOY_TAG = (params.MODE == 'both') ? env.IMAGE_VERSION : params.IMAGE_TAG
+                    echo "Deploying tag: ${env.DEPLOY_TAG} (MODE=${params.MODE})"
+                }
+            }
+        }
+
         stage('Ensure image pull secret') {
-            when { expression { params.MODE == 'cd' } }
+            when { expression { params.MODE == 'cd' || params.MODE == 'both' } }
             steps {
                 sh """
                 set -euo pipefail
@@ -74,7 +82,7 @@ pipeline {
             }
         }
         stage('Apply manifests') {
-            when { expression { params.MODE == 'cd' } }
+            when { expression { params.MODE == 'cd' || params.MODE == 'both' } }
             steps {
                 sh """
                 kubectl apply -f k8s/namespace.yaml
@@ -85,16 +93,16 @@ pipeline {
             }
         }
         stage('Set image tag') {
-            when { expression { params.MODE == 'cd' } }
+            when { expression { params.MODE == 'cd' || params.MODE == 'both' } }
             steps {
                 sh """
                 set -euo pipefail
                 if ! kubectl -n ${params.NAMESPACE} set image \\
-                    cronjob/cleanup-cron cleanup-batch=${env.FULL_IMAGE}:${params.IMAGE_TAG}; then
+                    cronjob/cleanup-cron cleanup-batch=${env.FULL_IMAGE}:${env.DEPLOY_TAG}; then
                     echo "WARN: failed to set image on cronjob/cleanup-cron"
                 fi
                 if ! kubectl -n ${params.NAMESPACE} set image \\
-                    job/cleanup-manual cleanup-batch=${env.FULL_IMAGE}:${params.IMAGE_TAG}; then
+                    job/cleanup-manual cleanup-batch=${env.FULL_IMAGE}:${env.DEPLOY_TAG}; then
                     echo "WARN: failed to set image on job/cleanup-manual. \\
                           The Job may be immutable after completion. \\
                           Delete it with: kubectl -n ${params.NAMESPACE} delete job cleanup-manual"
@@ -104,7 +112,7 @@ pipeline {
             }
         }
         stage('Verify') {
-            when { expression { params.MODE == 'cd' } }
+            when { expression { params.MODE == 'cd' || params.MODE == 'both' } }
             steps {
                 sh """
                 set -euo pipefail
@@ -127,7 +135,7 @@ pipeline {
         failure {
             echo "Pipeline (MODE=${params.MODE}) failed"
             script {
-                if (params.MODE == 'cd') {
+                if (params.MODE == 'cd' || params.MODE == 'both') {
                     sh "kubectl -n ${params.NAMESPACE} get all || true"
                 }
             }
