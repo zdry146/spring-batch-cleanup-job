@@ -1,5 +1,9 @@
 pipeline {
     agent any
+    tools {
+        maven 'maven'
+        jdk 'java'
+    }
     parameters {
         choice(
             name: 'MODE',
