@@ -2,14 +2,19 @@ pipeline {
     agent any
     parameters {
         choice(
+            name: 'MODE',
+            choices: ['ci', 'cd'],
+            description: 'ci = build+test+push image, cd = deploy image to k8s'
+        )
+        choice(
             name: 'IMAGE_TAG',
             choices: ['latest', '1.0.0'],
-            description: 'Image tag to deploy (matches what the build job pushes)'
+            description: 'Image tag to deploy (CD mode only)'
         )
         string(
             name: 'NAMESPACE',
             defaultValue: 'batch-jobs',
-            description: 'Kubernetes namespace'
+            description: 'Kubernetes namespace (CD mode only)'
         )
     }
     environment {
@@ -20,16 +25,39 @@ pipeline {
         ALIYUN_DOCKER_CREDS = credentials('aliyun-docker-login')
     }
     stages {
-        stage('Checkout') {
+        stage('Build & test') {
+            when { expression { params.MODE == 'ci' } }
             steps {
-                dir('spring-batch-cleanup-job') {
-                    git branch: 'main',
-                        url: 'https://github.com/zdry146/spring-batch-cleanup-job.git',
-                        credentialsId: 'git-cred'
+                sh 'mvn -B clean verify'
+            }
+        }
+        stage('Determine image version') {
+            when { expression { params.MODE == 'ci' } }
+            steps {
+                script {
+                    env.IMAGE_VERSION = sh(
+                        label: 'Read project version',
+                        script: 'mvn -B -q -DforceStdout -Dexpression=project.version help:evaluate',
+                        returnStdout: true
+                    ).trim()
                 }
             }
         }
+        stage('Build & push image') {
+            when { expression { params.MODE == 'ci' } }
+            steps {
+                sh """
+                set -euo pipefail
+                echo "\$ALIYUN_DOCKER_CREDS_PSW" | docker login -u "\$ALIYUN_DOCKER_CREDS_USR" --password-stdin "\$ALIYUN_REGISTRY"
+                docker build -t "\$FULL_IMAGE:\$IMAGE_VERSION" -t "\$FULL_IMAGE:latest" .
+                docker push "\$FULL_IMAGE:\$IMAGE_VERSION"
+                docker push "\$FULL_IMAGE:latest"
+                """
+            }
+        }
+
         stage('Ensure image pull secret') {
+            when { expression { params.MODE == 'cd' } }
             steps {
                 sh """
                 set -euo pipefail
@@ -42,18 +70,18 @@ pipeline {
             }
         }
         stage('Apply manifests') {
+            when { expression { params.MODE == 'cd' } }
             steps {
-                dir('spring-batch-cleanup-job') {
-                    sh """
-                    kubectl apply -f k8s/namespace.yaml
-                    kubectl apply -f k8s/secret.yaml
-                    kubectl apply -f k8s/cronjob.yaml
-                    kubectl apply -f k8s/job.yaml
-                    """
-                }
+                sh """
+                kubectl apply -f k8s/namespace.yaml
+                kubectl apply -f k8s/secret.yaml
+                kubectl apply -f k8s/cronjob.yaml
+                kubectl apply -f k8s/job.yaml
+                """
             }
         }
         stage('Set image tag') {
+            when { expression { params.MODE == 'cd' } }
             steps {
                 sh """
                 set -euo pipefail
@@ -72,6 +100,7 @@ pipeline {
             }
         }
         stage('Verify') {
+            when { expression { params.MODE == 'cd' } }
             steps {
                 sh """
                 set -euo pipefail
@@ -80,7 +109,7 @@ pipeline {
                     -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}{"\\n"}'
                 echo "Job image:"
                 kubectl -n ${params.NAMESPACE} get job cleanup-manual \\
-                    -o jsonpath='{.spec.template.spec.template.spec.containers[0].image}{"\\n"}'
+                    -o jsonpath='{.spec.template.spec.containers[0].image}{"\\n"}'
                 echo "Resources:"
                 kubectl -n ${params.NAMESPACE} get cronjob,job -o wide
                 """
@@ -88,9 +117,16 @@ pipeline {
         }
     }
     post {
+        success {
+            echo "Pipeline (MODE=${params.MODE}) succeeded"
+        }
         failure {
-            echo "Deploy failed. Cluster state:"
-            sh "kubectl -n ${params.NAMESPACE} get all || true"
+            echo "Pipeline (MODE=${params.MODE}) failed"
+            script {
+                if (params.MODE == 'cd') {
+                    sh "kubectl -n ${params.NAMESPACE} get all || true"
+                }
+            }
         }
     }
 }
