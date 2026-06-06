@@ -114,12 +114,17 @@ pipeline {
             steps {
                 sh """
                 set -euo pipefail
-                echo "CronJob image:"
-                kubectl -n ${params.NAMESPACE} get cronjob cleanup-cron \\
-                    -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}{"\\n"}'
-                echo "Job image:"
-                kubectl -n ${params.NAMESPACE} get job cleanup-manual \\
-                    -o jsonpath='{.spec.template.spec.containers[0].image}{"\\n"}'
+                EXPECTED='${env.FULL_IMAGE}:${env.DEPLOY_TAG}'
+                CRON_IMAGE=\$(kubectl -n ${params.NAMESPACE} get cronjob cleanup-cron \\
+                    -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}')
+                JOB_IMAGE=\$(kubectl -n ${params.NAMESPACE} get job cleanup-manual \\
+                    -o jsonpath='{.spec.template.spec.containers[0].image}')
+                echo "CronJob image: \$CRON_IMAGE"
+                echo "Job image:     \$JOB_IMAGE"
+                echo "Expected:      \$EXPECTED"
+                [ "\$CRON_IMAGE" = "\$EXPECTED" ] || { echo "FAIL: CronJob image \$CRON_IMAGE does not match expected \$EXPECTED"; exit 1; }
+                [ "\$JOB_IMAGE" = "\$EXPECTED" ] || { echo "FAIL: Job image \$JOB_IMAGE does not match expected \$EXPECTED"; exit 1; }
+                echo "All images match expected"
                 echo "Resources:"
                 kubectl -n ${params.NAMESPACE} get cronjob,job -o wide
                 """
