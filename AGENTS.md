@@ -15,113 +15,63 @@ This is a Kubernetes-deployable Spring Batch job that soft-deletes unpublished p
 - `src/main/java/com/example/cleanupjob/repository/PostRepository.java` - Spring Data JPA repository
 - `k8s/job.yaml` - Kubernetes Job manifest (manual trigger)
 - `k8s/cronjob.yaml` - Kubernetes CronJob manifest (scheduled daily at midnight)
-- `jenkins/ci-pipeline.groovy` - Source of truth for the CI pipeline script (build + test + push image)
-- `jenkins/deploy-pipeline.groovy` - Source of truth for the CD pipeline script (deploy image to k8s)
-- `jenkins/combined-pipeline.groovy` - Source of truth for the unified CI/CD script (single script, `MODE` parameter gates stages)
-- `scripts/` - E2E test scripts and Jenkins sync helpers
+- `jenkins/combined-pipeline-scm.groovy` - The single pipeline script (used by all 3 Jenkins jobs)
+- `scripts/jenkins-create-combined-jobs.py` - Idempotent helper to create or refresh the 3 Jenkins jobs
+- `scripts/` - E2E test scripts
 
 ## Jenkins Integration
 
-The CI and CD pipelines run on a local Jenkins instance.
+The CI/CD pipelines run on a local Jenkins instance.
 
 | Setting | Value |
 |---------|-------|
 | Jenkins URL | `http://192.168.232.128:8080/` |
 | Required credentials | `aliyun-docker-login`, `git-cred` |
+| Pipeline source | `jenkins/combined-pipeline-scm.groovy` on `main` (SCM) |
 
 ### Jenkins jobs
 
-| Job | Purpose | Script source | Status |
-|-----|---------|---------------|--------|
-| `spring-batch-cleanup-job` | CI: build, test, push image | `jenkins/ci-pipeline.groovy` | **Existing — keep** |
-| `spring-batch-cleanup-job-deploy` | CD: deploy image to k8s | `jenkins/deploy-pipeline.groovy` | **Existing — keep** |
-| `spring-batch-cleanup-job-ci` | CI via combined script (MODE=ci) | `jenkins/combined-pipeline.groovy` | **New — create** |
-| `spring-batch-cleanup-job-cd` | CD via combined script (MODE=cd) | `jenkins/combined-pipeline.groovy` | **New — create** |
+All three jobs are **Pipeline script from SCM** pointing at
+`jenkins/combined-pipeline-scm.groovy`. Any edit to that file is
+picked up on the next build with no manual sync.
 
-The two **existing** jobs stay as-is. The two **new** jobs share
-`jenkins/combined-pipeline.groovy` and differ only in the default value
-of the `MODE` parameter.
+| Job | Default `MODE` | Purpose |
+|-----|---------------|---------|
+| `spring-batch-cleanup-job-ci`   | `ci`   | Build + test + push image |
+| `spring-batch-cleanup-job-cd`   | `cd`   | Deploy image to k8s |
+| `spring-batch-cleanup-job-cicd` | `both` | CI then CD in one run |
 
-The script files in this repo and the scripts embedded in the Jenkins
-jobs are **not** auto-synced. After editing any `jenkins/*.groovy`,
-push the change to the running job with the helper scripts.
+`MODE` choices in the build form: `ci`, `cd`, `both`. When `MODE=both`,
+the tag deployed in CD is the same `IMAGE_VERSION` that CI just pushed
+(read from `pom.xml`).
 
-### Required env (export before running)
+### Recreating or adding jobs
 
-```bash
-export JENKINS_USER=<jenkins username>
-export JENKINS_TOKEN=<jenkins API token>   # not the password
-```
-
-Optional overrides: `JENKINS_URL`, `JOB_NAME`, `SCRIPT_PATH`,
-`SHOW_DIFF` (check), `DRY_RUN` (update).
-
-### Check drift (local vs. Jenkins)
+`scripts/jenkins-create-combined-jobs.py` is idempotent: it creates
+the three jobs above if they are missing, and refreshes their `MODE`
+parameter choices if they already exist. Re-run it any time.
 
 ```bash
-bash scripts/jenkins-check-deploy-job.sh
-# or for any other job:
-JOB_NAME=spring-batch-cleanup-job bash scripts/jenkins-check-deploy-job.sh
+export JENKINS_USER=admin JENKINS_TOKEN=...
+python3 scripts/jenkins-create-combined-jobs.py
 ```
 
-- Exits `0` when identical.
-- Exits `1` when they differ and prints a unified diff.
-- Exits `2` on auth / network / parse error.
+It also handles the CSRF crumb and cookie session that Jenkins
+requires for `createItem` and `config.xml` POSTs.
 
-### Push the local script to Jenkins
+### Editing the pipeline
 
-```bash
-# Preview the change first
-DRY_RUN=true bash scripts/jenkins-update-deploy-job.sh
+There is nothing to sync. Edit `jenkins/combined-pipeline-scm.groovy`,
+commit, push to `main`, and the next build of any of the three jobs
+runs the new script.
 
-# Apply
-bash scripts/jenkins-update-deploy-job.sh
+### Job workspace and Docker access
 
-# Confirm the round trip
-bash scripts/jenkins-check-deploy-job.sh
-```
-
-The update script fetches the current `config.xml`, replaces the
-`<script>` element with the local file contents, and POSTs it back. It
-handles CSRF crumbs automatically.
-
-### Workflow rule
-
-After any edit to a `jenkins/*.groovy` file:
-
-1. Commit and push to GitHub.
-2. Run `scripts/jenkins-update-deploy-job.sh` (override `JOB_NAME` and `SCRIPT_PATH` as needed) to publish to Jenkins.
-3. Run `scripts/jenkins-check-deploy-job.sh` to confirm.
-
-### Setting up the new combined jobs
-
-Create the two new jobs once in the Jenkins UI:
-
-1. **New Item → Pipeline**:
-   - `spring-batch-cleanup-job-ci` — paste the contents of
-     `jenkins/combined-pipeline.groovy` as the inline script.
-   - `spring-batch-cleanup-job-cd` — paste the same script.
-2. In each job's **Build Parameters** section, set the default for
-   `MODE` to `ci` or `cd` respectively (the `IMAGE_TAG` and `NAMESPACE`
-   defaults from the script are fine for both).
-3. After the job is created, sync the script back into the repo by
-   running the check script — if it shows drift, the in-Jenkins script
-   differs from the repo and you should align them.
-
-### Alternative: switch any job to "Pipeline script from SCM"
-
-For fully automatic sync, reconfigure the Jenkins job once:
-
-- Definition → Pipeline script from SCM → Git
-- Repository URL: `https://github.com/zdry146/spring-batch-cleanup-job.git`
-- Credentials: `git-cred`
-- Branch: `*/main`
-- Script Path: `jenkins/<combined-pipeline|deploy-pipeline|ci-pipeline>.groovy`
-
-After that, no manual sync is needed. The pipeline script must then
-be edited to drop the redundant `Checkout` stage and the
-`dir('spring-batch-cleanup-job')` wrappers (Jenkins checks out the
-repo into `$WORKSPACE` as the root).
+The Jenkins container is started by `/home/openclaw/start-jenkins.sh`,
+which binds the host's `docker.sock` and adds the host's `docker` group
+to the container (gid resolved at start time, so it survives future
+host gid changes). This is what lets the `ci` and `both` modes run
+`docker build` / `docker push` inside the agent.
 
 ## Environment Variables
 
