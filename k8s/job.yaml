@@ -11,7 +11,7 @@ spec:
         - name: aliyun-registry-cred
       containers:
       - name: cleanup-batch
-        image: crpi-e2h2rfj3kunrwe5n.cn-hangzhou.personal.cr.aliyuncs.com/mike-docker-registry/spring-batch-cleanup-job:latest
+        image: crpi-e2h2rfj3kunrwe5n.cn-hangzhou.personal.cr.aliyuncs.com/mike-docker-registry/spring-batch-cleanup-job:__SET_BY_DEPLOY__
         imagePullPolicy: Always
         env:
         # Database configuration
