@@ -106,7 +106,6 @@ pipeline {
                     echo "WARN: failed to set image on job/cleanup-manual. \\
                           The Job may be immutable after completion. \\
                           Delete it with: kubectl -n ${params.NAMESPACE} delete job cleanup-manual"
-                    exit 1
                 fi
                 """
             }
