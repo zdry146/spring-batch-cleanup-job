@@ -331,21 +331,28 @@ Recreate the container with the same flags it had, plus three new binds. The new
 
 ```bash
 -v /usr/local/bin/kubectl:/usr/local/bin/kubectl:ro
--v /root/.kube:/root/.kube:ro
--v /root/.minikube:/root/.minikube:ro
+-v /home/openclaw/.kube:/home/openclaw/.kube:ro
+-v /home/openclaw/.minikube:/home/openclaw/.minikube:ro
 ```
+
+**Why `/home/openclaw` and not `/root`:** the jenkins user inside the
+container is uid 1000. `/root/.kube` is mode 0700 owned by root, so the
+jenkins user cannot read it. `/home/openclaw/.kube` and
+`/home/openclaw/.minikube` are owned by openclaw (uid 1000) and are
+readable by the container's jenkins user.
 
 Example full command (adjust to match your existing flags — keep the docker socket and `/home/openclaw/jenkins_home` binds):
 
 ```bash
 docker run -d --name jenkins --restart=always \
   -p 8080:8080 \
+  -p 50000:50000 \
   -v /home/openclaw/jenkins_home:/var/jenkins_home \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /usr/bin/docker:/usr/bin/docker \
   -v /usr/local/bin/kubectl:/usr/local/bin/kubectl:ro \
-  -v /root/.kube:/root/.kube:ro \
-  -v /root/.minikube:/root/.minikube:ro \
+  -v /home/openclaw/.kube:/home/openclaw/.kube:ro \
+  -v /home/openclaw/.minikube:/home/openclaw/.minikube:ro \
   jenkins/jenkins:lts
 ```
 
@@ -355,7 +362,7 @@ docker run -d --name jenkins --restart=always \
 docker inspect jenkins --format '{{json .HostConfig.Binds}}' | python3 -m json.tool
 ```
 
-Expected: the list includes `kubectl`, `/root/.kube`, and `/root/.minikube` binds with `:ro` mode.
+Expected: the list includes `kubectl`, `/home/openclaw/.kube`, and `/home/openclaw/.minikube` binds with `:ro` mode.
 
 - [ ] **Step 6: Verify kubectl is callable inside the container**
 
@@ -378,10 +385,10 @@ Open `http://192.168.232.128:8080/` in a browser and log in. Confirm the existin
 - [ ] **Step 1: Confirm the minikube config exists**
 
 ```bash
-ls /root/.kube/config /root/.minikube 2>&1 | head
+ls /home/openclaw/.kube/config /home/openclaw/.minikube 2>&1 | head
 ```
 
-Expected: both paths exist. If `/root/.minikube` is missing, this host never had a working minikube; stop and re-check with the user before continuing.
+Expected: both paths exist. If `/home/openclaw/.minikube` is missing, this host never had a working minikube; stop and re-check with the user before continuing.
 
 - [ ] **Step 2: Start minikube**
 
