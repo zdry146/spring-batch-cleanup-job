@@ -13,10 +13,12 @@ spec:
       template:
         spec:
           restartPolicy: OnFailure
+          imagePullSecrets:
+            - name: aliyun-registry-cred
           containers:
           - name: cleanup-batch
-            image: cleanup-batch:1.0.0
-            imagePullPolicy: IfNotPresent
+            image: crpi-e2h2rfj3kunrwe5n.cn-hangzhou.personal.cr.aliyuncs.com/mike-docker-registry/spring-batch-cleanup-job:latest
+            imagePullPolicy: Always
             env:
             - name: DB_HOST
               value: "192.168.232.128"
