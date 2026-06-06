@@ -101,12 +101,8 @@ pipeline {
                     cronjob/cleanup-cron cleanup-batch=${env.FULL_IMAGE}:${env.DEPLOY_TAG}; then
                     echo "WARN: failed to set image on cronjob/cleanup-cron"
                 fi
-                if ! kubectl -n ${params.NAMESPACE} set image \\
-                    job/cleanup-manual cleanup-batch=${env.FULL_IMAGE}:${env.DEPLOY_TAG}; then
-                    echo "WARN: failed to set image on job/cleanup-manual. \\
-                          The Job may be immutable after completion. \\
-                          Delete it with: kubectl -n ${params.NAMESPACE} delete job cleanup-manual"
-                fi
+                kubectl -n ${params.NAMESPACE} delete job cleanup-manual --ignore-not-found
+                cat k8s/job.yaml | sed "s|image: ${env.FULL_IMAGE}:.*|image: ${env.FULL_IMAGE}:${env.DEPLOY_TAG}|" | kubectl -n ${params.NAMESPACE} apply -f -
                 """
             }
         }
