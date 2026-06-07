@@ -22,7 +22,10 @@ spring:
 
   batch:
     job:
-      enabled: true
+      # Spring Boot's default JobLauncherApplicationRunner is disabled. Our
+      # CleanupJobRunner replaces it so a same-day manual run is a graceful
+      # no-op when the CronJob already COMPLETED (see CleanupJobRunner).
+      enabled: false
       name: cleanupUnpublishedPostsJob
     jdbc:
       initialize-schema: always

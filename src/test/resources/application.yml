@@ -1,6 +1,11 @@
 spring:
   datasource:
-    url: jdbc:h2:mem:testdb
+    # ${random.uuid} gives each Spring test context its own H2 in-memory
+    # database, so JobInstance state from one test class doesn't leak into
+    # another (without this, tests that boot the job context and the
+    # repository-only context share the same DB and the second test fails
+    # with "job instance already complete").
+    url: jdbc:h2:mem:testdb-${random.uuid};DB_CLOSE_DELAY=-1
     driver-class-name: org.h2.Driver
   jpa:
     hibernate:
