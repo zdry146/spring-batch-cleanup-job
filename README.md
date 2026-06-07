@@ -9,7 +9,7 @@ deploy are all driven by Jenkins — `git push` is the only manual step.
 ```
 git push (main)  ─►  Jenkins spring-batch-cleanup-job-cicd
                           │
-                          ├─ CI: mvn verify  ─► 26 tests
+                          ├─ CI: mvn verify  ─► 27 tests
                           │      mvn help:evaluate (read pom version)
                           │      docker build + push :1.0.0 and :latest
                           │                        to Aliyun container registry
@@ -42,17 +42,21 @@ spring-batch-cleanup-job/
 │   ├── namespace.yaml                   # Namespace: batch-jobs
 │   ├── secret.yaml.example              # DB credentials template (gitignored: secret.yaml)
 │   ├── cronjob.yaml                     # Daily at midnight
-│   └── job.yaml                         # Manual trigger template
+│   └── job.yaml                         # Manual trigger template (image is sed-patched by the cd pipeline)
 ├── scripts/
 │   ├── insert-test-data.sql             # E2E test data
 │   ├── run-and-verify.sh                # E2E happy-path
 │   ├── test-error-injection.sh          # E2E retry/restart
 │   ├── test-restart-behavior.sh         # Reference: Spring Batch restart semantics
-│   └── jenkins-create-combined-jobs.py  # Idempotent Jenkins job manager
+│   ├── test-same-day-manual-run.sh      # E2E regression: same-day manual run is a no-op when cron already completed
+│   ├── jenkins-create-combined-jobs.py  # Idempotent Jenkins job manager
+│   ├── jenkins-upsert-secret-credential.py # Idempotent Jenkins Secret-text credential manager
+│   └── sql/
+│       └── cleanup-spring-batch-job.sql # Row-level cleanup of Spring Batch meta state for one job
 └── src/
     ├── main/java/com/example/cleanupjob/
     │   ├── CleanupJobApplication.java   # Spring Boot entry point
-    │   ├── job/                         # Job + step config
+    │   ├── job/                         # Job + step config + CleanupJobRunner
     │   ├── model/                       # JPA entity
     │   ├── processor/                   # Item processor
     │   ├── reader/                      # Item readers
@@ -61,7 +65,7 @@ spring-batch-cleanup-job/
     ├── main/resources/
     │   ├── application.yml              # Configuration
     │   └── schema.sql                   # posts table DDL (reference)
-    └── test/                            # Unit + integration tests (26 tests)
+    └── test/                            # Unit + integration tests (27 tests)
 ```
 
 ## Job Steps
@@ -88,6 +92,15 @@ launch. This gives us:
   new pod reuses the same `JobInstance`; Spring Batch resumes from the
   last committed chunk, so a completed step is skipped and a failed
   step restarts.
+- **Manual run on a day whose cron already completed** — a graceful
+  no-op. The custom `CleanupJobRunner` catches
+  `JobInstanceAlreadyCompleteException` (Spring Batch's
+  `startNextInstance` throws it when the latest instance for the
+  parameters is `COMPLETED`), logs an info line, and exits 0. Without
+  this catch the JVM exits non-zero, the pod restarts, the same error
+  fires, and the pod ends up in `CrashLoopBackOff` →
+  `BackoffLimitExceeded`. Covered by the regression test
+  `scripts/test-same-day-manual-run.sh`.
 - **Manual restart next day** — a fresh `JobInstance`.
 
 The previous design used `RunIdIncrementer`, which assigned a fresh
@@ -204,8 +217,9 @@ kubectl -n batch-jobs get job cleanup-manual \
 mvn test
 ```
 
-26 tests cover the reader, processor, writer, repository, and restart
-semantics (H2 in-memory database).
+27 tests cover the reader, processor, writer, repository, restart
+semantics, and the `CleanupJobRunner` no-op catch (H2 in-memory
+database).
 
 ### E2E against a real cluster
 
@@ -220,6 +234,14 @@ bash scripts/run-and-verify.sh
 
 # Inject errors and verify retry / restart
 bash scripts/test-error-injection.sh
+
+# Same-day manual run (the bug that CrashLoopBackOff'd cleanup-manual):
+#   Test A: COMPLETED instance present  → no-op
+#   Test B: row-level cleanup of state  → job actually runs
+#   Test C: post-B state                → no-op again
+# Auto-loads .env from project root; override the image with
+#   DEPLOY_IMAGE=crpi-...:TAG bash scripts/test-same-day-manual-run.sh
+bash scripts/test-same-day-manual-run.sh
 ```
 
 ## Operations
@@ -259,18 +281,27 @@ kubectl -n batch-jobs delete all --all
 | CD fails at `kubectl apply` | Minikube not running, or no kubeconfig | `kubectl get nodes` from the Jenkins host |
 | Pods stuck in `ImagePullBackOff` | `aliyun-registry-cred` secret missing or wrong | Re-run the cicd job (it recreates the secret) |
 | Manual Job stuck at `:latest` after a deploy | Job pod template frozen by the controller | The cicd job's `Set image tag` stage now delete+recreates it, so this self-heals on the next cicd run |
+| Manual Job in `CrashLoopBackOff` / `BackoffLimitExceeded` on the day the cron already completed | Pre-`CleanupJobRunner` image is deployed | Re-run `spring-batch-cleanup-job-cd` to pull the latest image (the fix lives in `CleanupJobRunner`) |
 
-### Reset Spring Batch schema
+### Reset Spring Batch state for a single job
 
-If Spring Batch tables get into a bad state, drop and recreate:
+The `batch_*` tables are shared infrastructure. To reset state for just
+this housekeeping job (e.g. to re-test the "no COMPLETED instance yet"
+path), do **not** `DROP TABLE` — that affects every job that uses
+Spring Batch. Use the row-level script instead:
 
 ```bash
 # Requires DB_PASSWORD in env (see Configuration → Environment Variables)
 PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -U "$DB_USERNAME" -d "$DB_DATABASE" \
-  -c "DROP TABLE IF EXISTS batch_step_execution_context, batch_step_execution, \
-       batch_job_execution_params, batch_job_execution_context, batch_job_instance, \
-       batch_job_execution CASCADE;"
+  -v job_name='cleanupUnpublishedPostsJob' -v ON_ERROR_STOP=1 \
+  -f scripts/sql/cleanup-spring-batch-job.sql
 ```
+
+The script deletes in dependency order (step context → step execution →
+job context → job params → job execution → job instance) inside a
+single transaction, so a mid-script failure leaves the DB in the same
+state it started in. The tables themselves and any other job's state
+are unaffected.
 
 ## Technology Stack
 

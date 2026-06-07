@@ -7,18 +7,22 @@ This is a Kubernetes-deployable Spring Batch job that soft-deletes unpublished p
 ## Key Files
 
 - `src/main/java/com/example/cleanupjob/job/CleanupJobConfig.java` - Job and step configuration
+- `src/main/java/com/example/cleanupjob/job/CleanupJobRunner.java` - `ApplicationRunner` that replaces Spring Boot's default; swallows `JobInstanceAlreadyCompleteException` so same-day manual run after cron completion is a graceful no-op
 - `src/main/java/com/example/cleanupjob/processor/SoftDeleteProcessor.java` - Item processor
 - `src/main/java/com/example/cleanupjob/reader/UnpublishedPostReader.java` - Reads unpublished posts older than 30 days
 - `src/main/java/com/example/cleanupjob/reader/DeletedPostReader.java` - Reads already-deleted posts
 - `src/main/java/com/example/cleanupjob/writer/BatchSoftDeleteWriter.java` - Batch soft-delete writer
 - `src/main/java/com/example/cleanupjob/model/Post.java` - JPA entity
 - `src/main/java/com/example/cleanupjob/repository/PostRepository.java` - Spring Data JPA repository
-- `k8s/job.yaml` - Kubernetes Job manifest (manual trigger)
+- `k8s/job.yaml` - Kubernetes Job manifest (manual trigger; image is sed-patched by the cd pipeline)
 - `k8s/cronjob.yaml` - Kubernetes CronJob manifest (scheduled daily at midnight)
+- `k8s/secret.yaml.example` - Template for `k8s/secret.yaml` (gitignored)
 - `jenkins/combined-pipeline-scm.groovy` - The single pipeline script (used by all 3 Jenkins jobs)
 - `scripts/jenkins-create-combined-jobs.py` - Idempotent helper to create or refresh the 3 Jenkins jobs
 - `scripts/jenkins-upsert-secret-credential.py` - Idempotent helper to create/rotate Jenkins Secret-text credentials (defaults to `db-password`)
-- `scripts/` - E2E test scripts
+- `scripts/sql/cleanup-spring-batch-job.sql` - Row-level cleanup of Spring Batch meta state for a single job (parameterized by `:job_name`); safe to run in a shared cluster — leaves other jobs' rows and the schema itself untouched
+- `scripts/test-same-day-manual-run.sh` - Regression test for the `CleanupJobRunner` fix: 3 sub-tests (no-op when COMPLETED instance exists / runs normally when state is empty / no-op again after the manual run)
+- `scripts/` - E2E test scripts (`run-and-verify.sh`, `test-error-injection.sh`, `test-restart-behavior.sh`, `test-same-day-manual-run.sh`)
 
 ## Jenkins Integration
 
@@ -114,15 +118,38 @@ Both steps use `SQLException` retry with fault tolerance.
 ## Testing
 
 ```bash
-# Unit tests (23 tests)
+# Unit tests (27 tests, including CleanupJobRunnerTest)
 mvn test
 
-# E2E test - run job and verify
+# E2E test - run job and verify (happy path)
 bash scripts/run-and-verify.sh
 
 # E2E test - error injection and restart
 bash scripts/test-error-injection.sh
+
+# E2E test - same-day manual run behavior (no-op / run / no-op)
+# Auto-loads .env from project root; uses DEPLOY_IMAGE env var to override
+# the image tag (default: crpi-...:latest).
+bash scripts/test-same-day-manual-run.sh
 ```
+
+### Resetting Spring Batch state for a single job
+
+The `batch_*` tables are shared infrastructure. To reset state for
+just this housekeeping job (e.g. to re-test the "no COMPLETED
+instance yet" path), do **not** `DROP TABLE` — that affects every
+job that uses Spring Batch. Use the row-level script instead:
+
+```bash
+PGPASSWORD=$DB_PASSWORD psql -h "$DB_HOST" -U "$DB_USERNAME" -d "$DB_DATABASE" \
+    -v job_name='cleanupUnpublishedPostsJob' -v ON_ERROR_STOP=1 \
+    -f scripts/sql/cleanup-spring-batch-job.sql
+```
+
+The script deletes in dependency order (step context → step execution
+→ job context → job params → job execution → job instance) inside a
+single transaction, so a mid-script failure leaves the DB in the
+same state it started in.
 
 ## Technology Stack
 
