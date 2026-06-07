@@ -4,15 +4,26 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Auto-load local dev credentials from .env (gitignored) so agents
+# and humans can run this script with zero environment setup.
+# An already-exported DB_PASSWORD in the shell always wins.
+if [ -z "${DB_PASSWORD:-}" ] && [ -f "$PROJECT_DIR/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$PROJECT_DIR/.env"
+  set +a
+fi
+
 NAMESPACE="batch-jobs"
 JOB_NAME="cleanup-manual"
 DOCKER_IMAGE="cleanup-batch:1.0.0"
 DB_HOST="${DB_HOST:-192.168.232.128}"
 DB_DATABASE="${DB_DATABASE:-testdb}"
 DB_USERNAME="${DB_USERNAME:-postgres}"
-DB_PASSWORD="${DB_PASSWORD:-postgres}"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+: "${DB_PASSWORD:?DB_PASSWORD must be set, e.g. 'export DB_PASSWORD=...' or create .env from .env.example}"
 
 psql_query() {
     PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USERNAME -d $DB_DATABASE -t -c "$1"

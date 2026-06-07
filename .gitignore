@@ -1,1 +1,7 @@
 target/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+k8s/secret.yaml

@@ -30,6 +30,7 @@ pipeline {
         ALIYUN_IMAGE     = 'spring-batch-cleanup-job'
         FULL_IMAGE       = "${env.ALIYUN_REGISTRY}/${env.ALIYUN_NAMESPACE}/${env.ALIYUN_IMAGE}"
         ALIYUN_DOCKER_CREDS = credentials('aliyun-docker-login')
+        DB_PASSWORD      = credentials('db-password')
     }
     stages {
         stage('Build & test') {
@@ -88,8 +89,13 @@ pipeline {
             when { expression { params.MODE == 'cd' || params.MODE == 'both' } }
             steps {
                 sh """
+                set -euo pipefail
                 kubectl apply -f k8s/namespace.yaml
-                kubectl apply -f k8s/secret.yaml
+                # db-credentials Secret is generated from the Jenkins 'db-password'
+                # credential at deploy time; k8s/secret.yaml is gitignored.
+                kubectl -n ${params.NAMESPACE} create secret generic db-credentials \\
+                    --from-literal=password="\${DB_PASSWORD}" \\
+                    --dry-run=client -o yaml | kubectl apply -f -
                 kubectl apply -f k8s/cronjob.yaml
                 """
             }

@@ -40,7 +40,7 @@ spring-batch-cleanup-job/
 │   └── combined-pipeline-scm.groovy     # Source of truth for the 3 Jenkins jobs
 ├── k8s/
 │   ├── namespace.yaml                   # Namespace: batch-jobs
-│   ├── secret.yaml                      # DB credentials (dev password)
+│   ├── secret.yaml.example              # DB credentials template (gitignored: secret.yaml)
 │   ├── cronjob.yaml                     # Daily at midnight
 │   └── job.yaml                         # Manual trigger template
 ├── scripts/
@@ -123,14 +123,28 @@ verifying a build before deciding whether to deploy.
 | `DB_HOST` | `192.168.232.128` | PostgreSQL host |
 | `DB_DATABASE` | `testdb` | Database name |
 | `DB_USERNAME` | `postgres` | Database user |
-| `DB_PASSWORD` | (empty) | Database password (set via k8s `Secret`) |
+| `DB_PASSWORD` | (required) | Database password (never hardcoded; see below) |
 | `ERROR_INJECTION_STEP1` | `false` | Set `true` to inject a `SQLException` in Step 1 (for testing) |
 | `ERROR_INJECTION_STEP2` | `false` | Set `true` to inject a `SQLException` in Step 2 |
 | `ERROR_TYPE` | `PERMANENT` | `PERMANENT` (fail after retries) or `TRANSIENT` (recover on retry) |
 
-For Kubernetes, set `DB_PASSWORD` via the `db-credentials` Secret
-(see `k8s/secret.yaml`); the others are inlined in `k8s/job.yaml` and
-`k8s/cronjob.yaml`.
+`DB_PASSWORD` is **never** committed. It flows in three different ways
+depending on where you are:
+
+- **Local scripts (`scripts/*.sh`)** — fail-fast on missing env var,
+  **but the scripts auto-load a gitignored `.env` from the project
+  root** so you can just `bash scripts/run-and-verify.sh` with zero
+  setup. Copy `.env.example` to `.env` once and edit it. An
+  already-exported `DB_PASSWORD` in your shell always wins over
+  `.env`. Alternative: set up `~/.pgpass` (mode `600`) and drop
+  `PGPASSWORD` entirely.
+- **Jenkins CD pipeline** — read from the `db-password` *Secret text*
+  credential and materialized into the cluster as the `db-credentials`
+  Secret at deploy time (`kubectl create secret … --dry-run | apply`).
+  No `k8s/secret.yaml` is committed.
+- **Manual `kubectl apply` without Jenkins** — copy
+  `k8s/secret.yaml.example` to `k8s/secret.yaml`, fill in the password,
+  apply it, then deploy the rest. The real `secret.yaml` is gitignored.
 
 ### Batch Configuration
 
@@ -251,7 +265,8 @@ kubectl -n batch-jobs delete all --all
 If Spring Batch tables get into a bad state, drop and recreate:
 
 ```bash
-PGPASSWORD=postgres psql -h 192.168.232.128 -U postgres -d testdb \
+# Requires DB_PASSWORD in env (see Configuration → Environment Variables)
+PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -U "$DB_USERNAME" -d "$DB_DATABASE" \
   -c "DROP TABLE IF EXISTS batch_step_execution_context, batch_step_execution, \
        batch_job_execution_params, batch_job_execution_context, batch_job_instance, \
        batch_job_execution CASCADE;"

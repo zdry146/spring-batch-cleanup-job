@@ -17,6 +17,7 @@ This is a Kubernetes-deployable Spring Batch job that soft-deletes unpublished p
 - `k8s/cronjob.yaml` - Kubernetes CronJob manifest (scheduled daily at midnight)
 - `jenkins/combined-pipeline-scm.groovy` - The single pipeline script (used by all 3 Jenkins jobs)
 - `scripts/jenkins-create-combined-jobs.py` - Idempotent helper to create or refresh the 3 Jenkins jobs
+- `scripts/jenkins-upsert-secret-credential.py` - Idempotent helper to create/rotate Jenkins Secret-text credentials (defaults to `db-password`)
 - `scripts/` - E2E test scripts
 
 ## Jenkins Integration
@@ -26,7 +27,7 @@ The CI/CD pipelines run on a local Jenkins instance.
 | Setting | Value |
 |---------|-------|
 | Jenkins URL | `http://192.168.232.128:8080/` |
-| Required credentials | `aliyun-docker-login`, `git-cred` |
+| Required credentials | `aliyun-docker-login` (username/password), `git-cred` (username/password), `db-password` (Secret text) |
 | Pipeline source | `jenkins/combined-pipeline-scm.groovy` on `main` (SCM) |
 
 ### Jenkins jobs
@@ -59,6 +60,23 @@ python3 scripts/jenkins-create-combined-jobs.py
 It also handles the CSRF crumb and cookie session that Jenkins
 requires for `createItem` and `config.xml` POSTs.
 
+### Managing the `db-password` credential
+
+`k8s/secret.yaml` is **gitignored**. The CD pipeline generates the
+`db-credentials` Kubernetes Secret at deploy time from the Jenkins
+`db-password` *Secret text* credential. Use
+`scripts/jenkins-upsert-secret-credential.py` to create or rotate it
+(idempotent):
+
+```bash
+export JENKINS_USER=admin JENKINS_TOKEN=...
+export CRED_SECRET='<the-postgres-password>'
+python3 scripts/jenkins-upsert-secret-credential.py
+```
+
+Override `CRED_ID` / `CRED_DESC` to manage other Secret-text
+credentials with the same script.
+
 ### Editing the pipeline
 
 There is nothing to sync. Edit `jenkins/combined-pipeline-scm.groovy`,
@@ -80,7 +98,7 @@ host gid changes). This is what lets the `ci` and `both` modes run
 | DB_HOST | 192.168.232.128 | PostgreSQL host |
 | DB_DATABASE | testdb | Database name |
 | DB_USERNAME | postgres | Database user |
-| DB_PASSWORD | (from secret) | Database password |
+| DB_PASSWORD | (required, never committed) | Database password — local scripts auto-load `.env` (gitignored, copy from `.env.example`) or `DB_PASSWORD` from the shell, and fail-fast otherwise; Jenkins reads from the `db-password` credential; k8s reads from the `db-credentials` Secret |
 | ERROR_INJECTION_STEP1 | false | Inject error in Step 1 |
 | ERROR_INJECTION_STEP2 | false | Inject error in Step 2 |
 | ERROR_TYPE | PERMANENT | Error type (PERMANENT or TRANSIENT) |
