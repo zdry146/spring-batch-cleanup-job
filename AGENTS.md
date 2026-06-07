@@ -31,6 +31,19 @@ This is a Kubernetes-deployable Spring Batch job that soft-deletes unpublished p
 
 The CI/CD pipelines run on a local Jenkins instance.
 
+### Prerequisites (one-time per host)
+
+The Jenkins container, the required plugins and credentials, the container registry credential (Aliyun ACR), and minikube as the deploy target are all set up by the generic [`jenkins-docker`](https://github.com/zdry146/agent-skills/tree/main/jenkins-docker) skill — not by hand-editing this project. The skill detects what's already present, prompts before overriding, and lines up plugins + credentials + minikube + ACR into a working E2E chain:
+
+```bash
+git clone https://github.com/zdry146/agent-skills.git
+cd agent-skills/jenkins-docker
+JENKINS_USER=… JENKINS_TOKEN=… ./scripts/setup-env.sh   # detect → prompt → apply
+JENKINS_USER=… JENKINS_TOKEN=… ./scripts/verify-e2e.sh  # confirm the chain works
+```
+
+`/home/openclaw/start-jenkins.sh` (mentioned at the end of this section) is the project's specific deployed instance of the skill's `scripts/start-jenkins.sh` pattern.
+
 | Setting | Value |
 |---------|-------|
 | Jenkins URL | `http://192.168.232.128:8080/` |

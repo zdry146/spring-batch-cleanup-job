@@ -177,6 +177,19 @@ different image.
 
 Use when you have a known-good build you want to promote.
 
+**Pre-reqs** (one-time per host, before the first Jenkins build): a Jenkins Docker container with the right plugins + credentials, a container registry credential (Aliyun ACR), and minikube as the deploy target — all wired together. Use the generic [`jenkins-docker`](https://github.com/zdry146/agent-skills/tree/main/jenkins-docker) skill — it detects what's already there, prompts before overriding, and verifies the E2E chain:
+
+```bash
+# clone the skill repo
+git clone https://github.com/zdry146/agent-skills.git
+cd agent-skills/jenkins-docker
+
+JENKINS_USER=… JENKINS_TOKEN=… ./scripts/setup-env.sh   # detect → prompt → apply
+JENKINS_USER=… JENKINS_TOKEN=… ./scripts/verify-e2e.sh  # confirm the chain works
+```
+
+The skill's `scripts/detect-env.sh` reports the current state; `setup-env.sh` lets you reuse / gap-fill / override per component. See the skill's `references/` for the manual ACR + minikube setup walkthroughs.
+
 1. Push your changes to `main`.
 2. In Jenkins, open `spring-batch-cleanup-job-cicd` and click **Build
    Now** (or use the `MODE=both` default build form). The job runs
