@@ -21,8 +21,11 @@ This is a Kubernetes-deployable Spring Batch job that soft-deletes unpublished p
 - `scripts/jenkins-create-combined-jobs.py` - Idempotent helper to create or refresh the 3 Jenkins jobs
 - `scripts/jenkins-upsert-secret-credential.py` - Idempotent helper to create/rotate Jenkins Secret-text credentials (defaults to `db-password`)
 - `scripts/sql/cleanup-spring-batch-job.sql` - Row-level cleanup of Spring Batch meta state for a single job (parameterized by `:job_name`); safe to run in a shared cluster — leaves other jobs' rows and the schema itself untouched
+- `scripts/lib-local.sh` - Shared helper sourced by every E2E script: `apply_local_job` does `delete + sed-on-stream + apply` so each script can deploy a locally-built image with optional `ERROR_INJECTION_*` env overrides; the file is never mutated (`sed -i` is gone)
+- `scripts/setup-local.sh` - One-time cluster prep for the local-Docker flow (creates `batch-jobs` namespace + `db-credentials` Secret from `.env`); idempotent
+- `scripts/e2e-cycle.sh` - The full local E2E cycle (mvn verify + docker build + setup + 4 e2e scripts); called by `mvn -Pe2e verify`
 - `scripts/test-same-day-manual-run.sh` - Regression test for the `CleanupJobRunner` fix: 3 sub-tests (no-op when COMPLETED instance exists / runs normally when state is empty / no-op again after the manual run)
-- `scripts/` - E2E test scripts (`run-and-verify.sh`, `test-error-injection.sh`, `test-restart-behavior.sh`, `test-same-day-manual-run.sh`)
+- `scripts/` - E2E test scripts (`run-and-verify.sh`, `test-error-injection.sh`, `test-restart-behavior.sh`, `test-same-day-manual-run.sh`); all source `lib-local.sh` and use `apply_local_job` instead of `kubectl apply -f k8s/job.yaml`
 
 ## Jenkins Integration
 
@@ -117,20 +120,29 @@ Both steps use `SQLException` retry with fault tolerance.
 
 ## Testing
 
+Two parallel paths, same source:
+
 ```bash
-# Unit tests (27 tests, including CleanupJobRunnerTest)
+# --- Path 1: Local-Docker (no Jenkins, no registry) ---
+
+# Unit + integration tests only
 mvn test
 
-# E2E test - run job and verify (happy path)
-bash scripts/run-and-verify.sh
+# Full E2E cycle: mvn verify + docker build + setup + 4 e2e scripts
+mvn -Pe2e verify
 
-# E2E test - error injection and restart
-bash scripts/test-error-injection.sh
+# Or run individual pieces
+bash scripts/setup-local.sh                   # one-time cluster prep
+mvn -B -DskipTests clean package              # build the jar
+docker build -t cleanup-batch:1.0.0 .        # build the local image
+bash scripts/run-and-verify.sh               # happy-path E2E
+bash scripts/test-error-injection.sh         # retry + restart E2E
+DEPLOY_IMAGE=cleanup-batch:1.0.0 \
+  bash scripts/test-same-day-manual-run.sh   # no-op regression E2E
 
-# E2E test - same-day manual run behavior (no-op / run / no-op)
-# Auto-loads .env from project root; uses DEPLOY_IMAGE env var to override
-# the image tag (default: crpi-...:latest).
-bash scripts/test-same-day-manual-run.sh
+# --- Path 2: Jenkins CI/CD (registry image) ---
+# Push to main, then click "Build Now" on spring-batch-cleanup-job-cicd
+# (uses the registry image; same scripts, different transport).
 ```
 
 ### Resetting Spring Batch state for a single job

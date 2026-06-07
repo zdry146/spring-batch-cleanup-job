@@ -29,8 +29,13 @@ NAMESPACE="batch-jobs"
 JOB_NAME="cleanup-manual"
 SPRING_BATCH_JOB_NAME="cleanupUnpublishedPostsJob"
 DEFAULT_IMAGE="crpi-e2h2rfj3kunrwe5n.cn-hangzhou.personal.cr.aliyuncs.com/mike-docker-registry/spring-batch-cleanup-job:latest"
-# Allow override via env (handy for testing a different tag in CI)
+# Allow override via env (handy for testing a different tag in CI,
+# or running the test against a local image: DEPLOY_IMAGE=cleanup-batch:1.0.0)
 DEPLOY_IMAGE="${DEPLOY_IMAGE:-$DEFAULT_IMAGE}"
+
+# Load the apply-local-job helper (delete + sed-on-stream + apply).
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib-local.sh"
 
 # --- env ----------------------------------------------------------------
 
@@ -59,16 +64,9 @@ psql_query() {
   PGPASSWORD=$DB_PASSWORD psql -h "$DB_HOST" -U "$DB_USERNAME" -d "$DB_DATABASE" -t -A -c "$1"
 }
 
+# Thin wrapper that pins DEPLOY_IMAGE so callers below stay readable.
 apply_job_with_image() {
-  # Mirrors the cd pipeline's "Set image tag" stage: sed the image into
-  # k8s/job.yaml (which ships with the __SET_BY_DEPLOY__ placeholder)
-  # then apply. Idempotent on the cluster (deletes + recreates the job).
-  local image="$1"
-  local image_no_tag="${image%:*}"
-  kubectl -n "$NAMESPACE" delete job "$JOB_NAME" --ignore-not-found >/dev/null 2>&1 || true
-  cat "$PROJECT_DIR/k8s/job.yaml" \
-    | sed "s|image: ${image_no_tag}:.*|image: ${image}|" \
-    | kubectl -n "$NAMESPACE" apply -f - >/dev/null
+  apply_local_job "$DEPLOY_IMAGE"
 }
 
 wait_for_pod() {

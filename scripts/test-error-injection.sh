@@ -19,11 +19,15 @@ fi
 
 NAMESPACE="batch-jobs"
 JOB_NAME="cleanup-manual"
-DOCKER_IMAGE="cleanup-batch:1.0.0"
+LOCAL_IMAGE="${LOCAL_IMAGE:-cleanup-batch:1.0.0}"
 DB_HOST="${DB_HOST:-192.168.232.128}"
 DB_DATABASE="${DB_DATABASE:-testdb}"
 DB_USERNAME="${DB_USERNAME:-postgres}"
 : "${DB_PASSWORD:?DB_PASSWORD must be set, e.g. 'export DB_PASSWORD=...' or create .env from .env.example}"
+
+# Load the apply-local-job helper (delete + sed-on-stream + apply).
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib-local.sh"
 
 psql_query() {
     PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USERNAME -d $DB_DATABASE -t -c "$1"
@@ -48,19 +52,15 @@ FROM generate_series(1, 5) i;
 UPDATE posts SET is_deleted = true, updated_at = NOW() WHERE title LIKE 'Restart Test%';
 EOF
 
-echo "2. Enabling ERROR_INJECTION_STEP1=true..."
-sed -i 's/ERROR_INJECTION_STEP1.*false/ERROR_INJECTION_STEP1 true/' "$PROJECT_DIR/k8s/job.yaml"
-
-echo "3. Rebuilding Docker image..."
+echo "2. Rebuilding Docker image with ERROR_INJECTION_STEP1=true baked in..."
 cd "$PROJECT_DIR"
 mvn clean package -DskipTests -q
-docker build -t $DOCKER_IMAGE . -q
+docker build -t $LOCAL_IMAGE . -q
 
-echo "4. Running job with Step 1 error injection..."
-kubectl delete job $JOB_NAME -n $NAMESPACE 2>/dev/null || true
-kubectl apply -f k8s/job.yaml
+echo "3. Running job with Step 1 error injection..."
+apply_local_job "$LOCAL_IMAGE" true
 
-echo "5. Waiting for job to fail (will retry 3 times, ~30 seconds)..."
+echo "4. Waiting for job to fail (will retry 3 times, ~30 seconds)..."
 sleep 40
 
 echo ""
@@ -73,15 +73,12 @@ kubectl get pods -n $NAMESPACE -l job-name=$JOB_NAME
 
 echo ""
 echo "8. Logs (showing retry behavior):"
-POD_NAME=$(kubectl get pods -n $NAMESPACE -l job-name=$JOB_NAME -o name | head -1)
-kubectl logs -n $NAMESPACE $POD_NAME 2>&1 | grep -E "(ERROR INJECTION|Retrying|retry|Step:|Job completed)" | head -20
-
-echo ""
-echo "9. Disabling error injection..."
-sed -i 's/ERROR_INJECTION_STEP1.*true/ERROR_INJECTION_STEP1 false/' "$PROJECT_DIR/k8s/job.yaml"
-
-mvn clean package -DskipTests -q
-docker build -t $DOCKER_IMAGE . -q
+POD_NAME=$(kubectl get pods -n $NAMESPACE -l job-name=$JOB_NAME -o name 2>/dev/null | head -1 || true)
+if [ -n "$POD_NAME" ]; then
+    kubectl logs -n $NAMESPACE $POD_NAME 2>&1 | grep -E "(ERROR INJECTION|Retrying|retry|Step:|Job completed)" | head -20 || true
+else
+    echo "(pod already reaped; skipping log dump)"
+fi
 
 echo ""
 echo "=============================================="
@@ -98,31 +95,28 @@ FROM generate_series(1, 5) i;
 UPDATE posts SET is_deleted = true, updated_at = NOW() WHERE title LIKE 'Restart Test%';
 EOF
 
-echo "2. Enabling ERROR_INJECTION_STEP2=true..."
-sed -i 's/ERROR_INJECTION_STEP2.*false/ERROR_INJECTION_STEP2 true/' "$PROJECT_DIR/k8s/job.yaml"
-
-echo "3. Rebuilding..."
+echo "2. Rebuilding Docker image with ERROR_INJECTION_STEP2=true baked in..."
 mvn clean package -DskipTests -q
-docker build -t $DOCKER_IMAGE . -q
+docker build -t $LOCAL_IMAGE . -q
 
-echo "4. Running job (Step 1 should succeed, Step 2 should fail)..."
-kubectl delete job $JOB_NAME -n $NAMESPACE 2>/dev/null || true
-kubectl apply -f k8s/job.yaml
+echo "3. Running job (Step 1 should succeed, Step 2 should fail)..."
+apply_local_job "$LOCAL_IMAGE" false true
+
 sleep 20
 
 echo ""
-echo "5. Job status (should show FAILED because Step 2 failed):"
+echo "4. Job status (should show FAILED because Step 2 failed):"
 kubectl get job $JOB_NAME -n $NAMESPACE
 
 echo ""
-echo "6. Step 1 was successful, Step 2 failed. Now testing restart..."
+echo "5. Step 1 was successful, Step 2 failed. Now testing restart..."
 
-sed -i 's/ERROR_INJECTION_STEP2.*true/ERROR_INJECTION_STEP2 false/' "$PROJECT_DIR/k8s/job.yaml"
+echo "6. Rebuilding Docker image with no error injection (for the restart run)..."
 mvn clean package -DskipTests -q
-docker build -t $DOCKER_IMAGE . -q
+docker build -t $LOCAL_IMAGE . -q
 
 echo "7. Restarting job (Step 1 should be SKIPPED)..."
-kubectl apply -f k8s/job.yaml
+apply_local_job "$LOCAL_IMAGE"
 sleep 20
 
 echo ""
@@ -131,8 +125,12 @@ kubectl get job $JOB_NAME -n $NAMESPACE
 
 echo ""
 echo "9. Logs (Step 1 should NOT appear in this run):"
-POD_NAME=$(kubectl get pods -n $NAMESPACE -l job-name=$JOB_NAME -o name | head -1)
-kubectl logs -n $NAMESPACE $POD_NAME 2>&1 | grep -E "(Step|Reader|Writer|Soft-deleting|Job completed)"
+POD_NAME=$(kubectl get pods -n $NAMESPACE -l job-name=$JOB_NAME -o name 2>/dev/null | head -1 || true)
+if [ -n "$POD_NAME" ]; then
+    kubectl logs -n $NAMESPACE $POD_NAME 2>&1 | grep -E "(Step|Reader|Writer|Soft-deleting|Job completed)" || true
+else
+    echo "(pod already reaped; skipping log dump)"
+fi
 
 echo ""
 echo "=============================================="

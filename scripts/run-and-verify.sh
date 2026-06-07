@@ -18,11 +18,15 @@ fi
 
 NAMESPACE="batch-jobs"
 JOB_NAME="cleanup-manual"
-DOCKER_IMAGE="cleanup-batch:1.0.0"
+LOCAL_IMAGE="${LOCAL_IMAGE:-cleanup-batch:1.0.0}"
 DB_HOST="${DB_HOST:-192.168.232.128}"
 DB_DATABASE="${DB_DATABASE:-testdb}"
 DB_USERNAME="${DB_USERNAME:-postgres}"
 : "${DB_PASSWORD:?DB_PASSWORD must be set, e.g. 'export DB_PASSWORD=...' or create .env from .env.example}"
+
+# Load the apply-local-job helper (delete + sed-on-stream + apply).
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib-local.sh"
 
 psql_query() {
     PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USERNAME -d $DB_DATABASE -t -c "$1"
@@ -73,15 +77,9 @@ psql_query "SELECT COUNT(*) FROM posts WHERE is_deleted = true;"
 
 echo ""
 echo "=============================================="
-echo "3. Deleting old job (if exists)"
+echo "3. Running cleanup job (local image $LOCAL_IMAGE)"
 echo "=============================================="
-kubectl delete job $JOB_NAME -n $NAMESPACE 2>/dev/null || true
-
-echo ""
-echo "=============================================="
-echo "4. Running cleanup job"
-echo "=============================================="
-kubectl apply -f k8s/job.yaml
+apply_local_job
 
 echo "Waiting for job to complete..."
 kubectl wait --for=condition=complete job/$JOB_NAME -n $NAMESPACE --timeout=60s 2>/dev/null || true
@@ -96,8 +94,12 @@ echo ""
 echo "=============================================="
 echo "6. Job logs"
 echo "=============================================="
-POD_NAME=$(kubectl get pods -n $NAMESPACE -l job-name=$JOB_NAME -o name | head -1)
-kubectl logs -n $NAMESPACE $POD_NAME 2>&1 | grep -E "(Step|Reader|Writer|Soft-deleting|Job completed)"
+POD_NAME=$(kubectl get pods -n $NAMESPACE -l job-name=$JOB_NAME -o name 2>/dev/null | head -1 || true)
+if [ -n "$POD_NAME" ]; then
+    kubectl logs -n $NAMESPACE $POD_NAME 2>&1 | grep -E "(Step|Reader|Writer|Soft-deleting|Job completed)" || true
+else
+    echo "(pod already reaped; skipping log dump)"
+fi
 
 echo ""
 echo "=============================================="

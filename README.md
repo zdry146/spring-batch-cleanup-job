@@ -1,8 +1,21 @@
 # Spring Batch Cleanup Job - Kubernetes Deployment
 
 A Spring Batch job that soft-deletes unpublished posts older than 30 days,
-deployed to Kubernetes on a daily schedule. Build, test, image push, and
-deploy are all driven by Jenkins — `git push` is the only manual step.
+deployed to Kubernetes on a daily schedule.
+
+The project supports two parallel flows for building, testing, and
+deploying:
+
+| Flow | Entry point | Image source | Used for |
+|---|---|---|---|
+| **Local-Docker** (debug) | `mvn -Pe2e verify` (or `bash scripts/run-and-verify.sh`) | Locally-built `cleanup-batch:1.0.0` — no registry | Day-to-day dev: rebuild fast, push nothing, watch the pod in your local cluster |
+| **Jenkins CI/CD** (promotion) | `spring-batch-cleanup-job-cicd` Jenkins job | Registry-pushed `crpi-…:1.0.0` and `:latest` | Promoting a known-good build to the testing cluster |
+
+Both flows share the same source, the same `k8s/job.yaml`, the same
+test scripts, and the same Maven `verify` lifecycle. The only
+difference is **where the image comes from** (local Docker daemon vs
+the registry) and **who triggers the build** (`mvn` in your shell vs
+Jenkins).
 
 ## Architecture
 
@@ -32,7 +45,7 @@ idempotent `scripts/jenkins-create-combined-jobs.py` helper), see
 
 ```
 spring-batch-cleanup-job/
-├── pom.xml                              # Maven configuration (version 1.0.0)
+├── pom.xml                              # Maven configuration (version 1.0.0, + e2e profile)
 ├── Dockerfile                           # Docker image build (JRE 21)
 ├── AGENTS.md                            # Agent-facing notes (Jenkins, env vars)
 ├── README.md                            # This file
@@ -42,8 +55,12 @@ spring-batch-cleanup-job/
 │   ├── namespace.yaml                   # Namespace: batch-jobs
 │   ├── secret.yaml.example              # DB credentials template (gitignored: secret.yaml)
 │   ├── cronjob.yaml                     # Daily at midnight
-│   └── job.yaml                         # Manual trigger template (image is sed-patched by the cd pipeline)
+│   └── job.yaml                         # Manual trigger template (image is sed-patched by the cd pipeline
+│                                        #   and by scripts/lib-local.sh::apply_local_job for local testing)
 ├── scripts/
+│   ├── lib-local.sh                     # Shared helper: apply_local_job (delete + sed-on-stream + apply)
+│   ├── setup-local.sh                   # One-time cluster prep (namespace + db-credentials Secret)
+│   ├── e2e-cycle.sh                     # Full local E2E cycle (called by `mvn -Pe2e verify`)
 │   ├── insert-test-data.sql             # E2E test data
 │   ├── run-and-verify.sh                # E2E happy-path
 │   ├── test-error-injection.sh          # E2E retry/restart
@@ -109,7 +126,56 @@ defeated Spring Batch's restart checkpointing.
 
 ## Deploying
 
-### Recommended: trigger the Jenkins `cicd` job
+### Path 1 — Local-Docker testing (debug, no registry)
+
+The fastest way to iterate. Maven runs unit + integration tests, builds
+the local Docker image, sets up the cluster namespace + Secret, and
+runs the four E2E scripts (happy path, error injection, restart, the
+same-day no-op regression) — all in one command.
+
+Pre-reqs (one-time per machine):
+- `mvn` (the project uses the wrapper at `./mvnw` if you have it, or
+  the system `mvn`)
+- `docker` (the local daemon builds the image)
+- `kubectl` (configured to talk to a cluster — minikube, kind, or a
+  remote one)
+- A Postgres reachable from the cluster's pods (this project assumes
+  `192.168.232.128:5432/testdb`; override via `.env`)
+
+```bash
+# One-time cluster prep
+bash scripts/setup-local.sh
+# (creates the batch-jobs namespace and the db-credentials Secret
+#  from your .env's DB_PASSWORD; idempotent)
+
+# Full E2E cycle (~3 min: mvn verify + docker build + 4 e2e scripts)
+mvn -Pe2e verify
+```
+
+Or run individual pieces directly (the same `apply_local_job` helper
+is used by every E2E script):
+
+```bash
+mvn -B clean verify                    # unit + integration tests only
+mvn -B -DskipTests clean package        # build the jar only
+docker build -t cleanup-batch:1.0.0 .  # build the local image
+bash scripts/run-and-verify.sh         # happy-path E2E
+bash scripts/test-error-injection.sh   # retry + restart with injected errors
+DEPLOY_IMAGE=cleanup-batch:1.0.0 \
+  bash scripts/test-same-day-manual-run.sh   # no-op regression
+```
+
+The local image is `cleanup-batch:1.0.0` and is consumed by
+`scripts/lib-local.sh::apply_local_job` which sed-patches
+`k8s/job.yaml`'s `__SET_BY_DEPLOY__` placeholder and flips
+`imagePullPolicy: Always` to `IfNotPresent` (so k8s uses the local
+daemon's image instead of trying to pull from a registry). This is
+the same sed-patch pattern Jenkins' cd pipeline uses, just with a
+different image.
+
+### Path 2 — Jenkins CI/CD (promotion to testing cluster)
+
+Use when you have a known-good build you want to promote.
 
 1. Push your changes to `main`.
 2. In Jenkins, open `spring-batch-cleanup-job-cicd` and click **Build

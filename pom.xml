@@ -83,6 +83,47 @@
                     </excludes>
                 </configuration>
             </plugin>
+            <!--
+              Local-Docker E2E profile: `mvn -Pe2e verify` runs the full
+              mvn verify + docker build + kubectl e2e cycle via
+              scripts/e2e-cycle.sh. This is the LOCAL DEBUG path,
+              parallel to the Jenkins CD pipeline (which does the same
+              thing but pushes the image to a registry first).
+            -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <configuration>
+                    <executable>bash</executable>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <profile>
+            <id>e2e</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>run-e2e-cycle</id>
+                                <phase>integration-test</phase>
+                                <goals><goal>exec</goal></goals>
+                                <configuration>
+                                    <arguments>
+                                        <argument>scripts/e2e-cycle.sh</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
