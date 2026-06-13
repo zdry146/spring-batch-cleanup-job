@@ -189,7 +189,18 @@ echo "=============================================="
 echo "STEP 3: Trigger spring-batch-cleanup-job-cicd (MODE=both)"
 echo "=============================================="
 
-# (Filled in by Task 5)
+# Invoke the (extended) jenkins-run-cicd.py with MODE=both and the
+# same DB_HOST/DB_DATABASE this script was run with, so the pod
+# deployed by Jenkins connects to the same DB this script queries.
+#
+# The script's `set -e` makes a non-SUCCESS build fatal — we never
+# reach STEP 4 in that case.
+echo "--- Triggering $JENKINS_CICD_JOB with MODE=both ---"
+JOB="$JENKINS_CICD_JOB" \
+MODE="both" \
+DB_HOST="$DB_HOST" \
+DB_DATABASE="$DB_DATABASE" \
+  "$SCRIPT_DIR/jenkins-run-cicd.py"
 
 # === STEP 4: VERIFY =====================================================
 echo ""
