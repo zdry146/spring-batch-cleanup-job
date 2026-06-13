@@ -236,7 +236,54 @@ echo "$POD_LOG" | grep -qE 'Job: \[.*cleanupUnpublishedPostsJob.*\] completed' \
   && pass "log: job completed" \
   || fail "log: job did NOT complete"
 
-# 4d. Data assertions (filled in by Task 7).
+# 4d. Data assertions. Each check compares the post-run count to the
+# expected count and increments PASS/FAIL accordingly. The final
+# `[ "$FAIL" = "0" ]` at the bottom of the script is the real gate.
+echo "--- Data assertions ---"
+
+assert_count() {
+  # $1=label  $2=expected  $3=SQL
+  local label="$1" expected="$2" sql="$3"
+  local actual
+  actual=$(psql_query "$sql")
+  if [ "$actual" = "$expected" ]; then
+    pass "data: ${label} = ${expected}"
+  else
+    fail "data: ${label}: expected ${expected} got ${actual}"
+  fi
+}
+
+# 1. Published old (3 rows): must STILL be is_deleted=false
+assert_count "published-old not soft-deleted" 3 \
+  "SELECT COUNT(*) FROM posts WHERE title LIKE 'E2E-published-old-%' AND is_deleted = false;"
+
+# 2. Published new (3 rows): must STILL be is_deleted=false
+assert_count "published-new not soft-deleted" 3 \
+  "SELECT COUNT(*) FROM posts WHERE title LIKE 'E2E-published-new-%' AND is_deleted = false;"
+
+# 3. Unpublished new (3 rows): must STILL be is_deleted=false
+assert_count "unpublished-new not soft-deleted" 3 \
+  "SELECT COUNT(*) FROM posts WHERE title LIKE 'E2E-unpublished-new-%' AND is_deleted = false;"
+
+# 4. Unpublished old (7 rows): MUST ALL be is_deleted=true
+assert_count "unpublished-old soft-deleted" 7 \
+  "SELECT COUNT(*) FROM posts WHERE title LIKE 'E2E-unpublished-old-%' AND is_deleted = true;"
+
+# 5. Already deleted (2 rows): must STILL be is_deleted=true (untouched)
+assert_count "already-deleted untouched" 2 \
+  "SELECT COUNT(*) FROM posts WHERE title LIKE 'E2E-already-deleted-%' AND is_deleted = true;"
+
+# 6. Spring Batch metadata: exactly 1 COMPLETED execution for today.
+# create_time is timestamp WITHOUT time zone, while NOW() returns
+# timestamptz — comparing directly uses the session timezone, which
+# can shift "today" by hours. The JVM in the container stores UTC, so
+# truncate today in UTC to match the stored values.
+assert_count "batch_job_execution COMPLETED today" 1 \
+  "SELECT COUNT(*) FROM batch_job_execution je
+ JOIN batch_job_instance ji ON ji.job_instance_id = je.job_instance_id
+ WHERE ji.job_name = '$SPRING_BATCH_JOB_NAME'
+   AND je.status = 'COMPLETED'
+   AND je.create_time >= date_trunc('day', NOW() AT TIME ZONE 'UTC');"
 
 # === SUMMARY ============================================================
 echo ""
