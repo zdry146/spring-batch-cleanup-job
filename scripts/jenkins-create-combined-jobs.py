@@ -16,7 +16,7 @@ import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 
-JENKINS_URL = os.environ.get("JENKINS_URL", "http://192.168.232.128:8080/")
+JENKINS_URL = os.environ.get("JENKINS_URL", "http://localhost:8080/")
 JENKINS_USER = os.environ["JENKINS_USER"]
 JENKINS_TOKEN = os.environ["JENKINS_TOKEN"]
 GIT_URL = "https://github.com/zdry146/spring-batch-cleanup-job.git"
@@ -84,6 +84,18 @@ def make_config_xml(job):
           <name>NAMESPACE</name>
           <description>Kubernetes namespace (cd mode only)</description>
           <defaultValue>batch-jobs</defaultValue>
+          <trim>false</trim>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>DB_HOST</name>
+          <description>PostgreSQL host (cluster-reachable IP/hostname) injected into both manifests as the DB_HOST env var (cd mode only).</description>
+          <defaultValue>192.168.126.133</defaultValue>
+          <trim>false</trim>
+        </hudson.model.StringParameterDefinition>
+        <hudson.model.StringParameterDefinition>
+          <name>DB_DATABASE</name>
+          <description>PostgreSQL database name injected into both manifests as the DB_DATABASE env var (cd mode only). Must match the database Spring Batch metadata + the application posts live in.</description>
+          <defaultValue>testdb</defaultValue>
           <trim>false</trim>
         </hudson.model.StringParameterDefinition>
       </parameterDefinitions>
@@ -184,6 +196,91 @@ def update_mode_choices(opener, crumb_f, crumb_v, name, desired):
         return e.code, e.read().decode("utf-8", errors="replace")[:500]
 
 
+# String parameters that every job should expose (used to backfill
+# existing jobs when the script's make_config_xml template gains a new
+# entry, so re-running this script is enough to roll out the change
+# without deleting/recreating the jobs).
+EXPECTED_STRING_PARAMS = (
+    {
+        "name": "DB_HOST",
+        "default": "192.168.126.133",
+        "description": (
+            "PostgreSQL host (cluster-reachable IP/hostname) injected into "
+            "both manifests as the DB_HOST env var (cd mode only)."
+        ),
+    },
+    {
+        "name": "DB_DATABASE",
+        "default": "testdb",
+        "description": (
+            "PostgreSQL database name injected into both manifests as the "
+            "DB_DATABASE env var (cd mode only). Must match the database "
+            "Spring Batch metadata + the application posts live in."
+        ),
+    },
+)
+
+
+def find_parameter_definitions(root):
+    """Return the <parameterDefinitions> element of the job's
+    ParametersDefinitionProperty, or None if the job has none."""
+    for prop in root.iter("hudson.model.ParametersDefinitionProperty"):
+        pd = prop.find("parameterDefinitions")
+        if pd is not None:
+            return pd
+    return None
+
+
+def ensure_string_parameter(opener, crumb_f, crumb_v, job_name, spec):
+    """If a <hudson.model.StringParameterDefinition> named spec['name'] is
+    not already present in the job's parameterDefinitions, add it with
+    the given default and description, and POST the updated config.xml
+    back. If it's already present, leave its existing default/description
+    alone (don't clobber a value the user set by hand).
+
+    Returns (http_status, 'unchanged' | 'added' | 'updated-or-error-detail').
+    """
+    config_url = f"{JENKINS_URL}job/{urllib.parse.quote(job_name)}/config.xml"
+    config_text = opener.open(urllib.request.Request(config_url)).read().decode("utf-8")
+    root = ET.fromstring(config_text)
+
+    param_defs = find_parameter_definitions(root)
+    if param_defs is None:
+        return 500, "no <parameterDefinitions> in job config (unexpected)"
+
+    # Look for an existing StringParameterDefinition with the same name.
+    for child in param_defs.findall("hudson.model.StringParameterDefinition"):
+        n = child.find("name")
+        if n is not None and n.text == spec["name"]:
+            return 200, "unchanged"
+
+    # Not present — append a fresh one.
+    new_param = ET.SubElement(param_defs, "hudson.model.StringParameterDefinition")
+    ET.SubElement(new_param, "name").text = spec["name"]
+    ET.SubElement(new_param, "description").text = spec["description"]
+    ET.SubElement(new_param, "defaultValue").text = spec["default"]
+    ET.SubElement(new_param, "trim").text = "false"
+
+    new_xml = ET.tostring(root, encoding="UTF-8", xml_declaration=True).decode("utf-8")
+    new_xml = new_xml.replace(
+        "<?xml version='1.0' encoding='UTF-8'?>",
+        "<?xml version='1.1' encoding='UTF-8'?>",
+        1,
+    )
+    post_url = f"{JENKINS_URL}job/{urllib.parse.quote(job_name)}/config.xml"
+    req = urllib.request.Request(
+        post_url,
+        data=new_xml.encode("utf-8"),
+        headers={"Content-Type": "application/xml", crumb_f: crumb_v},
+        method="POST",
+    )
+    try:
+        resp = opener.open(req)
+        return resp.status, "added"
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", errors="replace")[:500]
+
+
 def main():
     opener = make_opener()
     crumb_f, crumb_v = fetch_crumb(opener)
@@ -196,6 +293,19 @@ def main():
             else:
                 print(f"FAILED to update {name}: HTTP {status} {current}", file=sys.stderr)
                 sys.exit(1)
+
+            for spec in EXPECTED_STRING_PARAMS:
+                sp_status, sp_action = ensure_string_parameter(
+                    opener, crumb_f, crumb_v, name, spec
+                )
+                if sp_status == 200:
+                    if sp_action == "added":
+                        print(f"  + ADDED string param: {name}.{spec['name']} = {spec['default']!r}")
+                    else:
+                        print(f"  = UNCHANGED string param: {name}.{spec['name']}")
+                else:
+                    print(f"  FAILED to add string param {name}.{spec['name']}: HTTP {sp_status} {sp_action}", file=sys.stderr)
+                    sys.exit(1)
         else:
             status, body = create_job(opener, crumb_f, crumb_v, name, make_config_xml(job))
             if status in (200, 201):

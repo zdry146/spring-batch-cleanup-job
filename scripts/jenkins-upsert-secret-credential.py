@@ -6,7 +6,7 @@ already exists. Re-run safely. Defaults to creating 'db-password' with
 the value from the DB_PASSWORD env var.
 
 Env:
-  JENKINS_URL    (default: http://192.168.232.128:8080/)
+  JENKINS_URL    (default: http://localhost:8080/)
   JENKINS_USER   (required)
   JENKINS_TOKEN  (required - API token or password)
   CRED_ID        (default: db-password)
@@ -22,7 +22,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-JENKINS_URL = os.environ.get("JENKINS_URL", "http://192.168.232.128:8080/")
+JENKINS_URL = os.environ.get("JENKINS_URL", "http://localhost:8080/")
 JENKINS_USER = os.environ["JENKINS_USER"]
 JENKINS_TOKEN = os.environ["JENKINS_TOKEN"]
 CRED_ID = os.environ.get("CRED_ID", "db-password")

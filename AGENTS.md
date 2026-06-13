@@ -46,7 +46,7 @@ JENKINS_USER=… JENKINS_TOKEN=… ./scripts/verify-e2e.sh  # confirm the chain 
 
 | Setting | Value |
 |---------|-------|
-| Jenkins URL | `http://192.168.232.128:8080/` |
+| Jenkins URL | `http://localhost:8080/` (default; override per-call with `JENKINS_URL=…` env var on the `scripts/jenkins-*.py` helpers) |
 | Required credentials | `aliyun-docker-login` (username/password), `git-cred` (username/password), `db-password` (Secret text) |
 | Pipeline source | `jenkins/combined-pipeline-scm.groovy` on `main` (SCM) |
 
@@ -66,11 +66,24 @@ picked up on the next build with no manual sync.
 the tag deployed in CD is the same `IMAGE_VERSION` that CI just pushed
 (read from `pom.xml`).
 
+### Per-deploy database host and database name
+
+`DB_HOST` (string, default `192.168.126.133`) and `DB_DATABASE`
+(string, default `testdb`) are both build parameters. The CD pipeline
+sed-substitutes the `__DB_HOST__` and `__DB_DATABASE__` placeholders
+in `k8s/cronjob.yaml` and `k8s/job.yaml` with these values at apply
+time, so the same committed manifests can target any cluster-reachable
+PostgreSQL server and database. `Verify` stage asserts that both the
+CronJob and the Job ended up with the expected `DB_HOST`,
+`DB_DATABASE` (and image).
+
 ### Recreating or adding jobs
 
 `scripts/jenkins-create-combined-jobs.py` is idempotent: it creates
 the three jobs above if they are missing, and refreshes their `MODE`
-parameter choices if they already exist. Re-run it any time.
+choices + backfills any missing `DB_HOST` / `DB_DATABASE` string
+parameters if they already exist. Re-run it any time after the
+pipeline script changes.
 
 ```bash
 export JENKINS_USER=admin JENKINS_TOKEN=...
@@ -115,8 +128,8 @@ host gid changes). This is what lets the `ci` and `both` modes run
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| DB_HOST | 192.168.232.128 | PostgreSQL host |
-| DB_DATABASE | testdb | Database name |
+| DB_HOST | 192.168.232.128 (local e2e scripts) / 192.168.126.133 (Jenkins CD build param default) | PostgreSQL host; the Jenkins `DB_HOST` build parameter is sed-substituted into `k8s/cronjob.yaml` and `k8s/job.yaml` at deploy time, and `apply_local_job` accepts a 5th positional arg to override it for local E2E |
+| DB_DATABASE | testdb (matches `${DB_DATABASE:testdb}` in `src/main/resources/application.yml`) | PostgreSQL database name; the Jenkins `DB_DATABASE` build parameter is sed-substituted into both manifests at deploy time, and `apply_local_job` accepts a 6th positional arg to override it for local E2E |
 | DB_USERNAME | postgres | Database user |
 | DB_PASSWORD | (required, never committed) | Database password — local scripts auto-load `.env` (gitignored, copy from `.env.example`) or `DB_PASSWORD` from the shell, and fail-fast otherwise; Jenkins reads from the `db-password` credential; k8s reads from the `db-credentials` Secret |
 | ERROR_INJECTION_STEP1 | false | Inject error in Step 1 |

@@ -23,6 +23,16 @@ pipeline {
             defaultValue: 'batch-jobs',
             description: 'Kubernetes namespace (cd mode only)'
         )
+        string(
+            name: 'DB_HOST',
+            defaultValue: '192.168.126.133',
+            description: 'PostgreSQL host (cluster-reachable IP/hostname) injected into both manifests as the DB_HOST env var (cd mode only).'
+        )
+        string(
+            name: 'DB_DATABASE',
+            defaultValue: 'testdb',
+            description: 'PostgreSQL database name injected into both manifests as the DB_DATABASE env var (cd mode only). Must match the database Spring Batch metadata + the application posts live in.'
+        )
     }
     environment {
         ALIYUN_REGISTRY  = 'crpi-e2h2rfj3kunrwe5n.cn-hangzhou.personal.cr.aliyuncs.com'
@@ -96,7 +106,13 @@ pipeline {
                 kubectl -n ${params.NAMESPACE} create secret generic db-credentials \\
                     --from-literal=password="\${DB_PASSWORD}" \\
                     --dry-run=client -o yaml | kubectl apply -f -
-                kubectl apply -f k8s/cronjob.yaml
+                # Substitute the __DB_HOST__ / __DB_DATABASE__ placeholders
+                # with the build-time parameters so the same YAML can be
+                # deployed against any cluster-reachable PostgreSQL server
+                # and database.
+                sed -e "s|__DB_HOST__|${params.DB_HOST}|g" \\
+                    -e "s|__DB_DATABASE__|${params.DB_DATABASE}|g" \\
+                    k8s/cronjob.yaml | kubectl -n ${params.NAMESPACE} apply -f -
                 """
             }
         }
@@ -110,7 +126,10 @@ pipeline {
                     echo "WARN: failed to set image on cronjob/cleanup-cron"
                 fi
                 kubectl -n ${params.NAMESPACE} delete job cleanup-manual --ignore-not-found
-                cat k8s/job.yaml | sed "s|image: ${env.FULL_IMAGE}:.*|image: ${env.FULL_IMAGE}:${env.DEPLOY_TAG}|" | kubectl -n ${params.NAMESPACE} apply -f -
+                sed -e "s|__DB_HOST__|${params.DB_HOST}|g" \\
+                    -e "s|__DB_DATABASE__|${params.DB_DATABASE}|g" \\
+                    -e "s|image: ${env.FULL_IMAGE}:.*|image: ${env.FULL_IMAGE}:${env.DEPLOY_TAG}|" \\
+                    k8s/job.yaml | kubectl -n ${params.NAMESPACE} apply -f -
                 """
             }
         }
@@ -120,16 +139,36 @@ pipeline {
                 sh """
                 set -euo pipefail
                 EXPECTED='${env.FULL_IMAGE}:${env.DEPLOY_TAG}'
+                EXPECTED_DB='${params.DB_HOST}'
+                EXPECTED_DBNAME='${params.DB_DATABASE}'
                 CRON_IMAGE=\$(kubectl -n ${params.NAMESPACE} get cronjob cleanup-cron \\
                     -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].image}')
                 JOB_IMAGE=\$(kubectl -n ${params.NAMESPACE} get job cleanup-manual \\
                     -o jsonpath='{.spec.template.spec.containers[0].image}')
-                echo "CronJob image: \$CRON_IMAGE"
-                echo "Job image:     \$JOB_IMAGE"
-                echo "Expected:      \$EXPECTED"
+                CRON_DB=\$(kubectl -n ${params.NAMESPACE} get cronjob cleanup-cron \\
+                    -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].env[?(@.name=="DB_HOST")].value}')
+                JOB_DB=\$(kubectl -n ${params.NAMESPACE} get job cleanup-manual \\
+                    -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="DB_HOST")].value}')
+                CRON_DBNAME=\$(kubectl -n ${params.NAMESPACE} get cronjob cleanup-cron \\
+                    -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[0].env[?(@.name=="DB_DATABASE")].value}')
+                JOB_DBNAME=\$(kubectl -n ${params.NAMESPACE} get job cleanup-manual \\
+                    -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="DB_DATABASE")].value}')
+                echo "CronJob image:      \$CRON_IMAGE"
+                echo "Job image:          \$JOB_IMAGE"
+                echo "Expected image:     \$EXPECTED"
+                echo "CronJob DB_HOST:    \$CRON_DB"
+                echo "Job DB_HOST:        \$JOB_DB"
+                echo "Expected DB_HOST:   \$EXPECTED_DB"
+                echo "CronJob DB_DATABASE: \$CRON_DBNAME"
+                echo "Job DB_DATABASE:     \$JOB_DBNAME"
+                echo "Expected DB_DATABASE: \$EXPECTED_DBNAME"
                 [ "\$CRON_IMAGE" = "\$EXPECTED" ] || { echo "FAIL: CronJob image \$CRON_IMAGE does not match expected \$EXPECTED"; exit 1; }
                 [ "\$JOB_IMAGE" = "\$EXPECTED" ] || { echo "FAIL: Job image \$JOB_IMAGE does not match expected \$EXPECTED"; exit 1; }
-                echo "All images match expected"
+                [ "\$CRON_DB" = "\$EXPECTED_DB" ] || { echo "FAIL: CronJob DB_HOST \$CRON_DB does not match expected \$EXPECTED_DB"; exit 1; }
+                [ "\$JOB_DB" = "\$EXPECTED_DB" ] || { echo "FAIL: Job DB_HOST \$JOB_DB does not match expected \$EXPECTED_DB"; exit 1; }
+                [ "\$CRON_DBNAME" = "\$EXPECTED_DBNAME" ] || { echo "FAIL: CronJob DB_DATABASE \$CRON_DBNAME does not match expected \$EXPECTED_DBNAME"; exit 1; }
+                [ "\$JOB_DBNAME" = "\$EXPECTED_DBNAME" ] || { echo "FAIL: Job DB_DATABASE \$JOB_DBNAME does not match expected \$EXPECTED_DBNAME"; exit 1; }
+                echo "All images, DB_HOST and DB_DATABASE match expected"
                 echo "Resources:"
                 kubectl -n ${params.NAMESPACE} get cronjob,job -o wide
                 """

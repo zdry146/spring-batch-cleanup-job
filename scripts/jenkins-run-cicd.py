@@ -9,7 +9,7 @@ import urllib.request
 import urllib.error
 import http.cookiejar
 
-JENKINS_URL = os.environ.get("JENKINS_URL", "http://192.168.232.128:8080/")
+JENKINS_URL = os.environ.get("JENKINS_URL", "http://localhost:8080/")
 JOB = "spring-batch-cleanup-job-cicd"
 PARAM = "both"
 POLL_INTERVAL = 5

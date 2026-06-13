@@ -179,6 +179,8 @@ Use when you have a known-good build you want to promote.
 
 **Pre-reqs** (one-time per host, before the first Jenkins build): a Jenkins Docker container with the right plugins + credentials, a container registry credential (Aliyun ACR), and minikube as the deploy target — all wired together. Use the generic [`jenkins-docker`](https://github.com/zdry146/agent-skills/tree/main/jenkins-docker) skill — it detects what's already there, prompts before overriding, and verifies the E2E chain:
 
+The default Jenkins URL is `http://localhost:8080/`. All `scripts/jenkins-*.py` helpers honour a `JENKINS_URL` env-var override, and the full setup (credentials, jobs, URL default) lives in [AGENTS.md](AGENTS.md).
+
 ```bash
 # clone the skill repo
 git clone https://github.com/zdry146/agent-skills.git
@@ -200,6 +202,16 @@ The skill's `scripts/detect-env.sh` reports the current state; `setup-env.sh` le
 Use the `spring-batch-cleanup-job-cd` job. It skips the CI stages and
 just deploys. Set `IMAGE_TAG` to either `latest` (default) or a specific
 version tag like `1.0.0`.
+
+### Deploying against a different database
+
+The `DB_HOST` (string, default `192.168.126.133`) and `DB_DATABASE`
+(string, default `testdb`) build parameters are sed-substituted into
+the `__DB_HOST__` and `__DB_DATABASE__` placeholders in both
+`k8s/cronjob.yaml` and `k8s/job.yaml` at apply time, so the same
+committed manifests can target any cluster-reachable PostgreSQL server
+and database. The `Verify` stage asserts that both the CronJob and the
+Job ended up with the expected `DB_HOST` and `DB_DATABASE`.
 
 ### Just CI (no deploy)
 

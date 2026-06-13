@@ -16,9 +16,19 @@ spec:
         env:
         # Database configuration
         - name: DB_HOST
-          value: "192.168.232.128"
+          # Placeholder substituted by the Jenkins CD pipeline
+          # (DB_HOST build parameter) and by scripts/lib-local.sh's
+          # apply_local_job for local E2E. Set to the cluster-reachable
+          # IP/hostname of the PostgreSQL server the pod should use.
+          value: "__DB_HOST__"
         - name: DB_USERNAME
           value: "postgres"
+        - name: DB_DATABASE
+          # Placeholder substituted by the Jenkins CD pipeline
+          # (DB_DATABASE build parameter) and by scripts/lib-local.sh's
+          # apply_local_job for local E2E. Matches the
+          # ${DB_DATABASE:testdb} default in src/main/resources/application.yml.
+          value: "__DB_DATABASE__"
         - name: DB_PASSWORD
           valueFrom:
             secretKeyRef:
