@@ -66,7 +66,7 @@ psql_query() {
 }
 
 psql_exec() {
-  PGPASSWORD=$DB_PASSWORD psql -h "$DB_HOST" -U "$DB_USERNAME" -d "$DB_DATABASE"
+  PGPASSWORD=$DB_PASSWORD psql -h "$DB_HOST" -U "$DB_USERNAME" -d "$DB_DATABASE" -v ON_ERROR_STOP=1
 }
 
 echo "=============================================="
@@ -92,7 +92,7 @@ kubectl -n "$NAMESPACE" delete job "$JOB_NAME" --ignore-not-found
 # to run in a shared cluster (only touches rows for this job).
 echo "--- Cleaning Spring Batch state for $SPRING_BATCH_JOB_NAME ---"
 PGPASSWORD=$DB_PASSWORD psql -h "$DB_HOST" -U "$DB_USERNAME" -d "$DB_DATABASE" \
-  -v job_name="$SPRING_BATCH_JOB_NAME" -v ON_ERROR_STOP=1 \
+  -v job_name="$SPRING_BATCH_JOB_NAME" \
   -f "$SCRIPT_DIR/sql/cleanup-spring-batch-job.sql" | tail -4
 
 # === STEP 2: SEED =======================================================
