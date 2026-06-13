@@ -333,6 +333,13 @@ bash scripts/test-error-injection.sh
 # Auto-loads .env from project root; override the image with
 #   DEPLOY_IMAGE=crpi-...:TAG bash scripts/test-same-day-manual-run.sh
 bash scripts/test-same-day-manual-run.sh
+
+# Full registry-image end-to-end: triggers the Jenkins
+#   spring-batch-cleanup-job-cicd job and hard-asserts the data
+#   (unpublished-old soft-deleted, control rows untouched,
+#   Spring Batch metadata shows 1 COMPLETED execution).
+#   Registry-image counterpart to `mvn -Pe2e verify`.
+bash scripts/test-cicd-e2e.sh
 ```
 
 ## Operations

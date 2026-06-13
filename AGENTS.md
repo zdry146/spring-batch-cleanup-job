@@ -24,6 +24,7 @@ This is a Kubernetes-deployable Spring Batch job that soft-deletes unpublished p
 - `scripts/lib-local.sh` - Shared helper sourced by every E2E script: `apply_local_job` does `delete + sed-on-stream + apply` so each script can deploy a locally-built image with optional `ERROR_INJECTION_*` env overrides; the file is never mutated (`sed -i` is gone)
 - `scripts/setup-local.sh` - One-time cluster prep for the local-Docker flow (creates `batch-jobs` namespace + `db-credentials` Secret from `.env`); idempotent
 - `scripts/e2e-cycle.sh` - The full local E2E cycle (mvn verify + docker build + setup + 4 e2e scripts); called by `mvn -Pe2e verify`
+- `scripts/test-cicd-e2e.sh` - Full CI/CD end-to-end test: triggers the Jenkins `spring-batch-cleanup-job-cicd` job (mvn verify + docker build + registry push + k8s deploy) and **hard-asserts the data** (right rows soft-deleted, control rows untouched, Spring Batch metadata shows 1 COMPLETED execution). Registry-image counterpart to `e2e-cycle.sh`.
 - `scripts/test-same-day-manual-run.sh` - Regression test for the `CleanupJobRunner` fix: 3 sub-tests (no-op when COMPLETED instance exists / runs normally when state is empty / no-op again after the manual run)
 - `scripts/` - E2E test scripts (`run-and-verify.sh`, `test-error-injection.sh`, `test-restart-behavior.sh`, `test-same-day-manual-run.sh`); all source `lib-local.sh` and use `apply_local_job` instead of `kubectl apply -f k8s/job.yaml`
 
