@@ -101,7 +101,87 @@ echo "=============================================="
 echo "STEP 2: Seed test data"
 echo "=============================================="
 
-# (Filled in by Task 4)
+# 2a. Idempotent: delete any prior E2E-% rows from previous runs.
+# 2b. Insert 18 rows tagged E2E-%: 4 control groups + 7 unpublished-old
+#     (the actual soft-delete target) + 2 already-deleted.
+echo "--- Inserting 18 E2E-% test rows ---"
+psql_exec << 'SQLEOF'
+-- Idempotency: clear prior E2E-% rows
+DELETE FROM posts WHERE title LIKE 'E2E-%';
+
+-- 4 control groups: must NOT be soft-deleted by the job
+INSERT INTO posts (author_name, content, title, view_count, like_count, is_published, is_deleted, created_at, updated_at)
+SELECT
+    'E2E Author ' || i,
+    'E2E control row',
+    'E2E-published-old-' || i,
+    0, 0, true, false,
+    NOW() - INTERVAL '35 days',
+    NOW() - INTERVAL '35 days'
+FROM generate_series(1, 3) i;
+
+INSERT INTO posts (author_name, content, title, view_count, like_count, is_published, is_deleted, created_at, updated_at)
+SELECT
+    'E2E Author ' || i,
+    'E2E control row',
+    'E2E-published-new-' || i,
+    0, 0, true, false,
+    NOW() - INTERVAL '5 days',
+    NOW() - INTERVAL '5 days'
+FROM generate_series(1, 3) i;
+
+INSERT INTO posts (author_name, content, title, view_count, like_count, is_published, is_deleted, created_at, updated_at)
+SELECT
+    'E2E Author ' || i,
+    'E2E control row',
+    'E2E-unpublished-new-' || i,
+    0, 0, false, false,
+    NOW() - INTERVAL '5 days',
+    NOW() - INTERVAL '5 days'
+FROM generate_series(1, 3) i;
+
+-- 7 unpublished-old: MUST be soft-deleted by Step 1
+INSERT INTO posts (author_name, content, title, view_count, like_count, is_published, is_deleted, created_at, updated_at)
+SELECT
+    'E2E Author ' || i,
+    'E2E target row',
+    'E2E-unpublished-old-' || i,
+    0, 0, false, false,
+    NOW() - INTERVAL '35 days',
+    NOW() - INTERVAL '35 days'
+FROM generate_series(1, 7) i;
+
+-- 2 already-deleted: untouched by Step 1, processed by Step 2
+INSERT INTO posts (author_name, content, title, view_count, like_count, is_published, is_deleted, created_at, updated_at)
+SELECT
+    'E2E Author ' || i,
+    'E2E already-deleted row',
+    'E2E-already-deleted-' || i,
+    0, 0, false, true,
+    NOW() - INTERVAL '35 days',
+    NOW() - INTERVAL '35 days'
+FROM generate_series(1, 2) i;
+SQLEOF
+
+# 2c. Sanity-check the seed counts
+echo "--- Sanity-checking seed counts ---"
+EXPECTED_COUNTS=(
+  "E2E-published-old:3"
+  "E2E-published-new:3"
+  "E2E-unpublished-new:3"
+  "E2E-unpublished-old:7"
+  "E2E-already-deleted:2"
+)
+for spec in "${EXPECTED_COUNTS[@]}"; do
+  prefix="${spec%%:*}"
+  expected="${spec##*:}"
+  actual=$(psql_query "SELECT COUNT(*) FROM posts WHERE title LIKE '${prefix}-%';")
+  if [ "$actual" = "$expected" ]; then
+    pass "seed: ${prefix} count = ${expected}"
+  else
+    fail "seed: ${prefix} count expected ${expected} got ${actual}"
+  fi
+done
 
 # === STEP 3: TRIGGER CICD ===============================================
 echo ""
