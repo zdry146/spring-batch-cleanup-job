@@ -83,7 +83,17 @@ echo "=============================================="
 echo "STEP 1: Cleanup"
 echo "=============================================="
 
-# (Filled in by Task 3)
+# 1a. Delete the k8s cleanup-manual Job (ignore-not-found for re-runs).
+echo "--- Deleting k8s job $NAMESPACE/$JOB_NAME ---"
+kubectl -n "$NAMESPACE" delete job "$JOB_NAME" --ignore-not-found
+
+# 1b. Clear the cleanupUnpublishedPostsJob rows in batch_* via the
+# existing row-level primitive. Prints before/after row counts; safe
+# to run in a shared cluster (only touches rows for this job).
+echo "--- Cleaning Spring Batch state for $SPRING_BATCH_JOB_NAME ---"
+PGPASSWORD=$DB_PASSWORD psql -h "$DB_HOST" -U "$DB_USERNAME" -d "$DB_DATABASE" \
+  -v job_name="$SPRING_BATCH_JOB_NAME" -v ON_ERROR_STOP=1 \
+  -f "$SCRIPT_DIR/sql/cleanup-spring-batch-job.sql" | tail -4
 
 # === STEP 2: SEED =======================================================
 echo ""
