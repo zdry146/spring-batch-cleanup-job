@@ -583,7 +583,7 @@ JOB="$JENKINS_CICD_JOB" \
 MODE="both" \
 DB_HOST="$DB_HOST" \
 DB_DATABASE="$DB_DATABASE" \
-  bash "$SCRIPT_DIR/jenkins-run-cicd.py"
+  "$SCRIPT_DIR/jenkins-run-cicd.py"
 ```
 
 - [ ] **Step 2: Syntax check**
