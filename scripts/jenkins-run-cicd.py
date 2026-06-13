@@ -7,11 +7,19 @@ import base64
 import json
 import urllib.request
 import urllib.error
+import urllib.parse
 import http.cookiejar
 
-JENKINS_URL = os.environ.get("JENKINS_URL", "http://localhost:8080/")
-JOB = "spring-batch-cleanup-job-cicd"
-PARAM = "both"
+JENKINS_URL  = os.environ.get("JENKINS_URL", "http://localhost:8080/")
+JOB          = os.environ.get("JOB",         "spring-batch-cleanup-job-cicd")
+PARAM        = os.environ.get("MODE",        "both")
+# Extra build parameters appended to the buildWithParameters form body
+# when set. Empty strings are skipped so the script's pre-existing
+# call (JOB=… MODE=…) keeps working unchanged.
+EXTRA_PARAMS = {
+    k: os.environ[k] for k in ("DB_HOST", "DB_DATABASE", "IMAGE_TAG")
+    if os.environ.get(k)
+}
 POLL_INTERVAL = 5
 LOG_TAIL_BYTES = 60 * 1024  # last 60 KiB on each tail
 STREAM_POLL = 2
@@ -40,7 +48,10 @@ def fetch_crumb(opener):
 
 def trigger(opener, field, crumb):
     url = f"{JENKINS_URL}job/{JOB}/buildWithParameters"
-    data = f"MODE={PARAM}".encode()
+    body = [f"MODE={urllib.parse.quote(PARAM)}"]
+    for k, v in EXTRA_PARAMS.items():
+        body.append(f"{k}={urllib.parse.quote(v)}")
+    data = "&".join(body).encode()
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     if field and crumb:
         headers[field] = crumb
