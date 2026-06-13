@@ -208,7 +208,35 @@ echo "=============================================="
 echo "STEP 4: Verify"
 echo "=============================================="
 
-# (Filled in by Tasks 6 and 7)
+# 4a. Wait for the manual Job (created by the pipeline's Set image tag
+# stage) to finish. The pipeline's Verify stage already asserts the
+# env vars, so by the time we get here the spec is correct; this
+# step just confirms the pod actually ran to completion.
+echo "--- Waiting for k8s job $NAMESPACE/$JOB_NAME to complete ---"
+kubectl -n "$NAMESPACE" wait --for=condition=complete "job/$JOB_NAME" --timeout=180s
+
+# 4b. Capture the pod + its exit code (must be 0).
+POD=$(kubectl -n "$NAMESPACE" get pods -l "job-name=$JOB_NAME" -o name | head -1)
+[ -n "$POD" ] || { fail "no pod found for job $JOB_NAME"; exit 1; }
+POD="${POD#pod/}"
+POD_LOG=$(kubectl -n "$NAMESPACE" logs "$POD")
+POD_EXIT=$(kubectl -n "$NAMESPACE" get pod "$POD" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}')
+
+echo "Pod: $POD   exit: $POD_EXIT"
+[ "$POD_EXIT" = "0" ] && pass "pod exited 0" || fail "pod exit was $POD_EXIT, expected 0"
+
+# 4c. Soft-assert the expected log lines.
+echo "$POD_LOG" | grep -qE 'Step: \[cleanupStep\] executed' \
+  && pass "log: cleanupStep ran" \
+  || fail "log: cleanupStep did NOT run (no 'Step: [cleanupStep] executed' in log)"
+echo "$POD_LOG" | grep -qE 'Step: \[processDeletedPostsStep\] executed' \
+  && pass "log: processDeletedPostsStep ran" \
+  || fail "log: processDeletedPostsStep did NOT run"
+echo "$POD_LOG" | grep -qE 'Job: \[.*cleanupUnpublishedPostsJob.*\] completed' \
+  && pass "log: job completed" \
+  || fail "log: job did NOT complete"
+
+# 4d. Data assertions (filled in by Task 7).
 
 # === SUMMARY ============================================================
 echo ""
