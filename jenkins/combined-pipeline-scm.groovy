@@ -25,7 +25,7 @@ pipeline {
         )
         string(
             name: 'DB_HOST',
-            defaultValue: '192.168.126.133',
+            defaultValue: '192.168.232.128',
             description: 'PostgreSQL host (cluster-reachable IP/hostname) injected into both manifests as the DB_HOST env var (cd mode only).'
         )
         string(

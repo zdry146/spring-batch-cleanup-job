@@ -24,7 +24,7 @@
 #   error_step1  = false
 #   error_step2  = false
 #   error_type   = PERMANENT
-#   db_host      = 192.168.126.133 (matches the pre-placeholder value
+#   db_host      = 192.168.232.128 (matches the pre-placeholder value
 #                  hard-coded in k8s/job.yaml so existing flows keep
 #                  working; override here if your cluster reaches a
 #                  different PostgreSQL server)
@@ -35,7 +35,7 @@ apply_local_job() {
   local error_step1="${2:-false}"
   local error_step2="${3:-false}"
   local error_type="${4:-PERMANENT}"
-  local db_host="${5:-192.168.126.133}"
+  local db_host="${5:-192.168.232.128}"
   local db_name="${6:-testdb}"
   local image_no_tag="${image%:*}"
 
