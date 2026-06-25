@@ -47,6 +47,41 @@ pipeline {
             when { expression { params.MODE == 'ci' || params.MODE == 'both' } }
             steps { sh 'mvn -B clean verify' }
         }
+        stage('SonarQube analysis') {
+            when { expression { params.MODE == 'ci' || params.MODE == 'both' } }
+            steps {
+                script {
+                    withSonarQubeEnv('local-sonarqube') {
+                        sh '''
+                        set -euo pipefail
+                        mvn -B sonar:sonar \
+                          -Dsonar.projectKey=spring-batch-cleanup-job \
+                          -Dsonar.projectName='Spring Batch Cleanup Job' \
+                          -Dsonar.exclusions='target/**,docs/**,.opencode/**'
+                        '''
+                        // curl-based Quality Gate poll (avoids the JDK 21
+                        // Socket.connect(unresolved_addr) bug that breaks
+                        // waitForQualityGate's OkHttp client).
+                        def qgStatus = ''
+                        timeout(time: 5, unit: 'MINUTES') {
+                            waitUntil {
+                                qgStatus = sh(
+                                    script: 'curl -fsS -u "${SONAR_AUTH_TOKEN}:" "${SONAR_HOST_URL}/api/qualitygates/project_status?projectKey=spring-batch-cleanup-job" | jq -r \'.projectStatus.status\'',
+                                    returnStdout: true
+                                ).trim()
+                                echo "SonarQube Quality Gate status: ${qgStatus}"
+                                return ['OK', 'WARN', 'ERROR'].contains(qgStatus)
+                            }
+                        }
+                        if (qgStatus == 'ERROR') {
+                            error("SonarQube Quality Gate failed (status=${qgStatus})")
+                        } else if (qgStatus == 'WARN') {
+                            unstable("SonarQube Quality Gate warning (status=${qgStatus})")
+                        }
+                    }
+                }
+            }
+        }
         stage('Determine image version') {
             when { expression { params.MODE == 'ci' || params.MODE == 'both' } }
             steps {
