@@ -65,34 +65,45 @@ pipeline {
                         // ---- Quality Gate check (webhook-based) ----
                         // SonarQube has a webhook registered pointing to
                         // http://192.168.232.128:8080/sonarqube-webhook/.
-                        // waitForQualityGate() blocks here until SonarQube POSTs
-                        // the analysis result back via that webhook (or the
-                        // timeout fires). This replaces the previous curl
-                        // polling loop.
+                        //
+                        // waitForQualityGate() must be called OUTSIDE the
+                        // withSonarQubeEnv block: SonarBuildWrapper's
+                        // AddBuildInfo.Disposer reads target/sonar/report-task.txt
+                        // and adds the SonarAnalysisAction build action in its
+                        // tearDown, which runs AFTER this block exits. If we
+                        // call waitForQualityGate() here, the action has not yet
+                        // been added and it throws:
+                        //   IllegalStateException: No previous SonarQube
+                        //   analysis found on this pipeline execution.
+                        //
+                        // SonarQube 26.x defaults sonar.validateWebhooks=true,
+                        // which rejects local-network URLs. We set
+                        // sonar.validateWebhooks=false in sonar.properties and
+                        // also keep the webhook row inserted via DB as a
+                        // belt-and-braces measure (see earlier diagnostic).
+                        //
+                        // We pin sonar-maven-plugin to 5.7.0.6970 because the
+                        // 4.0.0.4121 line (resolved by default from the
+                        // codehaus.mojo -> sonarsource.scanner.maven relocation)
+                        // forks a SonarScanner CLI subprocess and never
+                        // produces report-task.txt in some configurations; the
+                        // 5.x line uses the scanner-engine bridge and reliably
+                        // writes it.
                         //
                         // Status semantics from the SonarQube Jenkins plugin:
                         //   OK    -> build passes
                         //   WARN  -> build marked UNSTABLE (yellow)
                         //   ERROR -> build fails (red)
-                        //
-                        // NOTE: we pin sonar-maven-plugin to 5.7.0.6970 (not
-                        // the default 4.0.0.4121) because the older version
-                        // forks a SonarScanner CLI subprocess and does NOT
-                        // register the analysis as a Jenkins build action,
-                        // which makes waitForQualityGate() throw
-                        // "No previous SonarQube analysis found". The 5.x line
-                        // uses the scanner-engine bridge and runs the scanner
-                        // inline, which properly registers with the SonarQube
-                        // Jenkins plugin (sonar@2.18.3) so
-                        // waitForQualityGate() can find the task.
-                        timeout(time: 5, unit: 'MINUTES') {
-                            def qg = waitForQualityGate()
-                            if (qg.status == 'ERROR') {
-                                error("SonarQube Quality Gate failed (status=${qg.status})")
-                            } else if (qg.status == 'WARN') {
-                                unstable("SonarQube Quality Gate warning (status=${qg.status})")
-                            }
-                        }
+                    }
+                }
+                // waitForQualityGate() must run AFTER withSonarQubeEnv so
+                // AddBuildInfo.tearDown() has registered the analysis.
+                timeout(time: 5, unit: 'MINUTES') {
+                    def qg = waitForQualityGate()
+                    if (qg.status == 'ERROR') {
+                        error("SonarQube Quality Gate failed (status=${qg.status})")
+                    } else if (qg.status == 'WARN') {
+                        unstable("SonarQube Quality Gate warning (status=${qg.status})")
                     }
                 }
             }
