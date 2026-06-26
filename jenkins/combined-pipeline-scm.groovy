@@ -57,26 +57,36 @@ pipeline {
                         mvn -B sonar:sonar \
                           -Dsonar.projectKey=spring-batch-cleanup-job \
                           -Dsonar.projectName='Spring Batch Cleanup Job' \
+                          -Dsonar.java.binaries=target/classes \
+                          -Dsonar.java.test.binaries=target/test-classes \
                           -Dsonar.exclusions='target/**,docs/**,.opencode/**'
                         '''
-                        // curl-based Quality Gate poll (avoids the JDK 21
-                        // Socket.connect(unresolved_addr) bug that breaks
-                        // waitForQualityGate's OkHttp client).
-                        def qgStatus = ''
+                        // ---- Quality Gate check (webhook-based) ----
+                        // SonarQube has a webhook registered pointing to
+                        // http://192.168.232.128:8080/sonarqube-webhook/.
+                        // waitForQualityGate() blocks here until SonarQube POSTs
+                        // the analysis result back via that webhook (or the
+                        // timeout fires). This replaces the previous curl
+                        // polling loop.
+                        //
+                        // Status semantics from the SonarQube Jenkins plugin:
+                        //   OK    -> build passes
+                        //   WARN  -> build marked UNSTABLE (yellow)
+                        //   ERROR -> build fails (red)
+                        //
+                        // NOTE: previously we used curl polling to work around a
+                        // JDK 21 + glibc bug in the plugin's OkHttp client's DNS
+                        // path (Socket.connect(unresolved_addr) throws
+                        // UnknownHostException). If that bug regresses in this
+                        // plugin version (sonar@2.18.3), revert this block to
+                        // the curl polling implementation.
                         timeout(time: 5, unit: 'MINUTES') {
-                            waitUntil {
-                                qgStatus = sh(
-                                    script: 'curl -fsS -u "${SONAR_AUTH_TOKEN}:" "${SONAR_HOST_URL}/api/qualitygates/project_status?projectKey=spring-batch-cleanup-job" | jq -r \'.projectStatus.status\'',
-                                    returnStdout: true
-                                ).trim()
-                                echo "SonarQube Quality Gate status: ${qgStatus}"
-                                return ['OK', 'WARN', 'ERROR'].contains(qgStatus)
+                            def qg = waitForQualityGate()
+                            if (qg.status == 'ERROR') {
+                                error("SonarQube Quality Gate failed (status=${qg.status})")
+                            } else if (qg.status == 'WARN') {
+                                unstable("SonarQube Quality Gate warning (status=${qg.status})")
                             }
-                        }
-                        if (qgStatus == 'ERROR') {
-                            error("SonarQube Quality Gate failed (status=${qgStatus})")
-                        } else if (qgStatus == 'WARN') {
-                            unstable("SonarQube Quality Gate warning (status=${qgStatus})")
                         }
                     }
                 }
