@@ -102,9 +102,19 @@ pipeline {
                 // script {} block (declarative steps blocks do not allow
                 // `def qg = stepCall()` because they expect each statement
                 // to be a step, not a variable assignment).
+                //
+                // We MUST pass credentialsId explicitly. Without it, the
+                // plugin falls back to SonarInstallation.getServerAuthenticationToken()
+                // (the deprecated static-token field), which is empty when the
+                // installation is configured with credentialsId only. The
+                // request to /api/ce/task then goes out unauthenticated and
+                // SonarQube returns 401 ("Fail to request .../api/ce/task").
+                // SonarUtils.getAuthenticationToken(run, installation, null)
+                // does NOT look at the installation's own credentialsId when
+                // the parameter is null -- it only uses the legacy field.
                 script {
                     timeout(time: 5, unit: 'MINUTES') {
-                        def qg = waitForQualityGate()
+                        def qg = waitForQualityGate(credentialsId: 'sonarqube-token')
                         if (qg.status == 'ERROR') {
                             error("SonarQube Quality Gate failed (status=${qg.status})")
                         } else if (qg.status == 'WARN') {
