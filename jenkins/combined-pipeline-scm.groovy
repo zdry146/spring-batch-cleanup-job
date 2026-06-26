@@ -54,7 +54,8 @@ pipeline {
                     withSonarQubeEnv('local-sonarqube') {
                         sh '''
                         set -euo pipefail
-                        mvn -B sonar:sonar \
+                        mvn -B \
+                          org.sonarsource.scanner.maven:sonar-maven-plugin:5.7.0.6970:sonar \
                           -Dsonar.projectKey=spring-batch-cleanup-job \
                           -Dsonar.projectName='Spring Batch Cleanup Job' \
                           -Dsonar.java.binaries=target/classes \
@@ -74,12 +75,16 @@ pipeline {
                         //   WARN  -> build marked UNSTABLE (yellow)
                         //   ERROR -> build fails (red)
                         //
-                        // NOTE: previously we used curl polling to work around a
-                        // JDK 21 + glibc bug in the plugin's OkHttp client's DNS
-                        // path (Socket.connect(unresolved_addr) throws
-                        // UnknownHostException). If that bug regresses in this
-                        // plugin version (sonar@2.18.3), revert this block to
-                        // the curl polling implementation.
+                        // NOTE: we pin sonar-maven-plugin to 5.7.0.6970 (not
+                        // the default 4.0.0.4121) because the older version
+                        // forks a SonarScanner CLI subprocess and does NOT
+                        // register the analysis as a Jenkins build action,
+                        // which makes waitForQualityGate() throw
+                        // "No previous SonarQube analysis found". The 5.x line
+                        // uses the scanner-engine bridge and runs the scanner
+                        // inline, which properly registers with the SonarQube
+                        // Jenkins plugin (sonar@2.18.3) so
+                        // waitForQualityGate() can find the task.
                         timeout(time: 5, unit: 'MINUTES') {
                             def qg = waitForQualityGate()
                             if (qg.status == 'ERROR') {
