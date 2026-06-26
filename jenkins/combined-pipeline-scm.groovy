@@ -98,12 +98,18 @@ pipeline {
                 }
                 // waitForQualityGate() must run AFTER withSonarQubeEnv so
                 // AddBuildInfo.tearDown() has registered the analysis.
-                timeout(time: 5, unit: 'MINUTES') {
-                    def qg = waitForQualityGate()
-                    if (qg.status == 'ERROR') {
-                        error("SonarQube Quality Gate failed (status=${qg.status})")
-                    } else if (qg.status == 'WARN') {
-                        unstable("SonarQube Quality Gate warning (status=${qg.status})")
+                // It is itself a pipeline step, so it must live inside a
+                // script {} block (declarative steps blocks do not allow
+                // `def qg = stepCall()` because they expect each statement
+                // to be a step, not a variable assignment).
+                script {
+                    timeout(time: 5, unit: 'MINUTES') {
+                        def qg = waitForQualityGate()
+                        if (qg.status == 'ERROR') {
+                            error("SonarQube Quality Gate failed (status=${qg.status})")
+                        } else if (qg.status == 'WARN') {
+                            unstable("SonarQube Quality Gate warning (status=${qg.status})")
+                        }
                     }
                 }
             }
