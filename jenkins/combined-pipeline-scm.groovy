@@ -139,13 +139,27 @@ pipeline {
         stage('Build & push image') {
             when { expression { params.MODE == 'ci' || params.MODE == 'both' } }
             steps {
+                // Login + image build happen once. The two `docker push`
+                // calls each get their own `retry(3)` block because
+                // aliyun cn-hangzhou's registry has been observed to
+                // RST the connection mid-upload of large blobs (see
+                // build #5 of 2026-06-27). `docker push` is layer-aware
+                // and idempotent, so re-running is cheap: the registry
+                // skips layers that already landed and only re-uploads
+                // the ones that did not. We split the two pushes into
+                // independent retry blocks so a transient failure on
+                // the second tag does not invalidate the first.
                 sh """
                 set -euo pipefail
                 echo "\$ALIYUN_DOCKER_CREDS_PSW" | docker login -u "\$ALIYUN_DOCKER_CREDS_USR" --password-stdin "\$ALIYUN_REGISTRY"
                 docker build -t "\$FULL_IMAGE:\$IMAGE_VERSION" -t "\$FULL_IMAGE:latest" .
-                docker push "\$FULL_IMAGE:\$IMAGE_VERSION"
-                docker push "\$FULL_IMAGE:latest"
                 """
+                retry(3) {
+                    sh 'set -euo pipefail; docker push "$FULL_IMAGE:$IMAGE_VERSION"'
+                }
+                retry(3) {
+                    sh 'set -euo pipefail; docker push "$FULL_IMAGE:latest"'
+                }
             }
         }
 
