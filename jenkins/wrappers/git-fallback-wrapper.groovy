@@ -12,10 +12,13 @@ node {
                 sh '''#!/bin/bash
                     set -e
                     cd ''' + workspace + '''
-                    rm -rf .cloned-tmp
+                    # Clean leftover state from previous build (otherwise cp -a
+                    # merges the cloned .git/ into the existing one and fails
+                    # with Permission denied creating ./.git/.git/...).
+                    rm -rf .cloned-tmp .git target node_modules .m2
                     git clone --depth=1 -b main https://github.com/zdry146/spring-batch-cleanup-job.git .cloned-tmp
-                    # Overwrite workspace contents with cloned repo (handles existing .git correctly)
-                    shopt -s dotglob
+                    # Overwrite workspace contents with cloned repo.
+                    shopt -s dotglob nullglob
                     cp -a .cloned-tmp/. .
                     rm -rf .cloned-tmp
                 '''
@@ -31,9 +34,10 @@ node {
             sh '''#!/bin/bash
                 set -e
                 cd ''' + workspace + '''
-                rm -rf .cloned-tmp
+                # Clean leftover state from previous build (see above).
+                rm -rf .cloned-tmp .git target node_modules .m2
                 git clone --depth=1 -b main git@gitee.com:zdry146/spring-batch-cleanup-job.git .cloned-tmp
-                shopt -s dotglob
+                shopt -s dotglob nullglob
                 cp -a .cloned-tmp/. .
                 rm -rf .cloned-tmp
             '''
