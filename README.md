@@ -34,12 +34,18 @@ git push (main)  ─►  Jenkins spring-batch-cleanup-job-cicd
 ```
 
 The pipeline source of truth is `jenkins/combined-pipeline-scm.groovy` on
-`main`. The three Jenkins jobs (`-ci`, `-cd`, `-cicd`) are all
-**Pipeline script from SCM** and pick up edits to that file automatically.
+`main`. The three Jenkins jobs (`-ci`, `-cd`, `-cicd`) are
+**Pipeline script** (not "Pipeline from SCM") wrapping
+`jenkins/wrappers/git-fallback-wrapper.groovy`. The wrapper does
+`git clone` (GitHub primary, 30s timeout, then Gitee fallback over SSH),
+moves the cloned files into the workspace root, then `evaluate()`s the
+real pipeline script. This gives us a working pipeline even when GitHub
+is unreachable, since "Pipeline from SCM" would fail before any
+fallback logic could run.
 
 For the agent/Jenkins details (URL, credentials, job management, the
-idempotent `scripts/jenkins-create-combined-jobs.py` helper), see
-[AGENTS.md](AGENTS.md).
+idempotent `scripts/jenkins-create-combined-jobs.py` helper, the
+GitHub/Gitee SSH key setup), see [AGENTS.md](AGENTS.md).
 
 ## Project Structure
 
@@ -50,7 +56,9 @@ spring-batch-cleanup-job/
 ├── AGENTS.md                            # Agent-facing notes (Jenkins, env vars)
 ├── README.md                            # This file
 ├── jenkins/
-│   └── combined-pipeline-scm.groovy     # Source of truth for the 3 Jenkins jobs
+│   ├── combined-pipeline-scm.groovy     # Source of truth for the 3 Jenkins jobs (loaded by wrapper)
+│   └── wrappers/
+│       └── git-fallback-wrapper.groovy  # GitHub→Gitee fallback wrapper (embedded in each job's config)
 ├── k8s/
 │   ├── namespace.yaml                   # Namespace: batch-jobs
 │   ├── secret.yaml.example              # DB credentials template (gitignored: secret.yaml)
@@ -410,4 +418,4 @@ are unaffected.
 - JPA / Hibernate
 - Docker
 - Kubernetes (namespace `batch-jobs`)
-- Jenkins (Pipeline from SCM)
+- Jenkins (Pipeline script with GitHub→Gitee fallback wrapper)

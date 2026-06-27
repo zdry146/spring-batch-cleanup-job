@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
 """Ensure spring-batch-cleanup-job-{ci,cd,cicd} exist on Jenkins as
-'Pipeline script from SCM' jobs pointing at this repo, and that their
-MODE parameter offers all three choices (ci, cd, both).
+'Pipeline script' jobs whose wrapper does GitHub->Gitee fallback and
+then evaluate()s jenkins/combined-pipeline-scm.groovy from the
+checked-out repo.
 
 Idempotent: creates the job if missing, otherwise updates the MODE
-choice list to match the desired state. Re-run safely.
+choice list and the embedded wrapper script to match the desired
+state. Re-run safely.
+
+Requires on the Jenkins host:
+- ~/.ssh/github_key + ~/.ssh/gitee_key (see AGENTS.md)
+- ~/.ssh/config with per-host IdentityFile entries
+- Script approval done once in the UI after the first install
+  (the wrapper's text needs an Approve in /scriptApproval before the
+  first build can run; this script handles XML escaping + crumb + cookie)
 """
 import base64
 import http.cookiejar
 import json
 import os
+import pathlib
 import sys
 import urllib.error
 import urllib.parse
@@ -19,16 +29,15 @@ import xml.etree.ElementTree as ET
 JENKINS_URL = os.environ.get("JENKINS_URL", "http://localhost:8080/")
 JENKINS_USER = os.environ["JENKINS_USER"]
 JENKINS_TOKEN = os.environ["JENKINS_TOKEN"]
-GIT_URL = "https://github.com/zdry146/spring-batch-cleanup-job.git"
-GIT_CRED_ID = "git-cred"
-BRANCH = "*/main"
-SCRIPT_PATH = "jenkins/combined-pipeline-scm.groovy"
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+WRAPPER_PATH = REPO_ROOT / "jenkins" / "wrappers" / "git-fallback-wrapper.groovy"
 
 # Order matters: the first choice is the default in Jenkins.
 JOBS = [
-    {"name": "spring-batch-cleanup-job-ci",   "description": "CI: build, test, push image. Pipeline from SCM.",            "mode_choices": ["ci",   "cd", "both"]},
-    {"name": "spring-batch-cleanup-job-cd",   "description": "CD: deploy image to k8s. Pipeline from SCM.",                "mode_choices": ["cd",   "ci", "both"]},
-    {"name": "spring-batch-cleanup-job-cicd", "description": "Full pipeline: CI then CD in one run. Pipeline from SCM.",   "mode_choices": ["both", "ci", "cd"]},
+    {"name": "spring-batch-cleanup-job-ci",   "description": "CI: build, test, push image. Pipeline script + GitHub->Gitee wrapper.",          "mode_choices": ["ci",   "cd", "both"]},
+    {"name": "spring-batch-cleanup-job-cd",   "description": "CD: deploy image to k8s. Pipeline script + GitHub->Gitee wrapper.",              "mode_choices": ["cd",   "ci", "both"]},
+    {"name": "spring-batch-cleanup-job-cicd", "description": "Full pipeline: CI then CD in one run. Pipeline script + GitHub->Gitee wrapper.", "mode_choices": ["both", "ci", "cd"]},
 ]
 
 
@@ -50,7 +59,24 @@ def fetch_crumb(opener):
     return data["crumbRequestField"], data["crumb"]
 
 
-def make_config_xml(job):
+def xml_escape(s):
+    """Escape for embedding in an XML CDATA-free attribute / element."""
+    return (
+        s.replace("&", "&amp;")
+         .replace("<", "&lt;")
+         .replace(">", "&gt;")
+         .replace('"', "&quot;")
+         .replace("'", "&apos;")
+    )
+
+
+def load_wrapper():
+    """Read the wrapper Groovy file from this repo."""
+    with open(WRAPPER_PATH) as f:
+        return f.read()
+
+
+def make_config_xml(job, wrapper_text):
     choices = "".join(
         f"              <string>{c}</string>\n" for c in job["mode_choices"]
     )
@@ -101,25 +127,9 @@ def make_config_xml(job):
       </parameterDefinitions>
     </hudson.model.ParametersDefinitionProperty>
   </properties>
-  <definition class="org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition">
-    <scm class="hudson.plugins.git.GitSCM">
-      <userRemoteConfigs>
-        <hudson.plugins.git.UserRemoteConfig>
-          <url>{GIT_URL}</url>
-          <credentialsId>{GIT_CRED_ID}</credentialsId>
-        </hudson.plugins.git.UserRemoteConfig>
-      </userRemoteConfigs>
-      <branches>
-        <hudson.plugins.git.BranchSpec>
-          <name>{BRANCH}</name>
-        </hudson.plugins.git.BranchSpec>
-      </branches>
-      <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
-      <submoduleCfg class="list"/>
-      <extensions/>
-    </scm>
-    <scriptPath>{SCRIPT_PATH}</scriptPath>
-    <lightweight>true</lightweight>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps">
+    <script>{xml_escape(wrapper_text)}</script>
+    <sandbox>false</sandbox>
   </definition>
   <triggers/>
   <disabled>false</disabled>
@@ -154,8 +164,7 @@ def create_job(opener, crumb_f, crumb_v, name, config_xml):
 
 
 def update_mode_choices(opener, crumb_f, crumb_v, name, desired):
-    """Fetch config.xml, add any missing MODE choices, POST back. Returns
-    (http_status, current_choices)."""
+    """Fetch config.xml, add any missing MODE choices, POST back."""
     req = urllib.request.Request(f"{JENKINS_URL}job/{urllib.parse.quote(name)}/config.xml")
     config_text = opener.open(req).read().decode("utf-8")
 
@@ -174,7 +183,7 @@ def update_mode_choices(opener, crumb_f, crumb_v, name, desired):
                 break
 
     if set(current) >= set(desired):
-        return 200, current  # already up to date
+        return 200, current
 
     new_xml = ET.tostring(root, encoding="UTF-8", xml_declaration=True).decode("utf-8")
     new_xml = new_xml.replace(
@@ -196,10 +205,57 @@ def update_mode_choices(opener, crumb_f, crumb_v, name, desired):
         return e.code, e.read().decode("utf-8", errors="replace")[:500]
 
 
-# String parameters that every job should expose (used to backfill
-# existing jobs when the script's make_config_xml template gains a new
-# entry, so re-running this script is enough to roll out the change
-# without deleting/recreating the jobs).
+def update_wrapper_script(opener, crumb_f, crumb_v, name, wrapper_text):
+    """Replace the embedded <script> in the job's <definition> block with
+    the current wrapper text. If the definition is still CpsScmFlowDefinition
+    (legacy), convert it to CpsFlowDefinition with the embedded wrapper."""
+    config_url = f"{JENKINS_URL}job/{urllib.parse.quote(name)}/config.xml"
+    config_text = opener.open(urllib.request.Request(config_url)).read().decode("utf-8")
+
+    # Convert legacy "Pipeline from SCM" definition to "Pipeline script"
+    # + embedded wrapper, if needed.
+    legacy_pat = (
+        '<definition class="org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition"'
+        ' plugin="workflow-cps">'
+        '.*?'
+        '</definition>'
+    )
+    if "CpsScmFlowDefinition" in config_text:
+        new_def = (
+            '<definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition"'
+            ' plugin="workflow-cps">'
+            f'<script>{xml_escape(wrapper_text)}</script>'
+            '<sandbox>false</sandbox>'
+            '</definition>'
+        )
+        config_text = re.sub(legacy_pat, new_def, config_text, count=1, flags=re.DOTALL)
+        # Also strip leftover <scm> and <scriptPath> from the legacy block
+        config_text = re.sub(r'\s*<scriptPath>[^<]*</scriptPath>', '', config_text)
+        config_text = re.sub(r'\s*<scm[^>]*>.*?</scm>', '', config_text, flags=re.DOTALL)
+    else:
+        # Already a CpsFlowDefinition; just update the script body.
+        script_pat = re.compile(r'(<script>)(.*?)(</script>)', re.DOTALL)
+        config_text = script_pat.sub(
+            lambda m: m.group(1) + xml_escape(wrapper_text) + m.group(3),
+            config_text,
+            count=1,
+        )
+
+    post_url = f"{JENKINS_URL}job/{urllib.parse.quote(name)}/config.xml"
+    req = urllib.request.Request(
+        post_url,
+        data=config_text.encode("utf-8"),
+        headers={"Content-Type": "application/xml", crumb_f: crumb_v},
+        method="POST",
+    )
+    try:
+        resp = opener.open(req)
+        return resp.status, "wrapper-updated" if "CpsFlowDefinition" in config_text else "wrapper-updated"
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", errors="replace")[:500]
+
+
+# String parameters that every job should expose
 EXPECTED_STRING_PARAMS = (
     {
         "name": "DB_HOST",
@@ -222,8 +278,6 @@ EXPECTED_STRING_PARAMS = (
 
 
 def find_parameter_definitions(root):
-    """Return the <parameterDefinitions> element of the job's
-    ParametersDefinitionProperty, or None if the job has none."""
     for prop in root.iter("hudson.model.ParametersDefinitionProperty"):
         pd = prop.find("parameterDefinitions")
         if pd is not None:
@@ -232,14 +286,6 @@ def find_parameter_definitions(root):
 
 
 def ensure_string_parameter(opener, crumb_f, crumb_v, job_name, spec):
-    """If a <hudson.model.StringParameterDefinition> named spec['name'] is
-    not already present in the job's parameterDefinitions, add it with
-    the given default and description, and POST the updated config.xml
-    back. If it's already present, leave its existing default/description
-    alone (don't clobber a value the user set by hand).
-
-    Returns (http_status, 'unchanged' | 'added' | 'updated-or-error-detail').
-    """
     config_url = f"{JENKINS_URL}job/{urllib.parse.quote(job_name)}/config.xml"
     config_text = opener.open(urllib.request.Request(config_url)).read().decode("utf-8")
     root = ET.fromstring(config_text)
@@ -248,13 +294,11 @@ def ensure_string_parameter(opener, crumb_f, crumb_v, job_name, spec):
     if param_defs is None:
         return 500, "no <parameterDefinitions> in job config (unexpected)"
 
-    # Look for an existing StringParameterDefinition with the same name.
     for child in param_defs.findall("hudson.model.StringParameterDefinition"):
         n = child.find("name")
         if n is not None and n.text == spec["name"]:
             return 200, "unchanged"
 
-    # Not present — append a fresh one.
     new_param = ET.SubElement(param_defs, "hudson.model.StringParameterDefinition")
     ET.SubElement(new_param, "name").text = spec["name"]
     ET.SubElement(new_param, "description").text = spec["description"]
@@ -282,11 +326,28 @@ def ensure_string_parameter(opener, crumb_f, crumb_v, job_name, spec):
 
 
 def main():
+    # Late import for re.sub used in update_wrapper_script
+    global re
+    import re
+
     opener = make_opener()
     crumb_f, crumb_v = fetch_crumb(opener)
+    wrapper_text = load_wrapper()
+
     for job in JOBS:
         name = job["name"]
         if job_exists(opener, name):
+            # Always refresh the wrapper script (idempotent; only POSTs if
+            # the embedded script body differs).
+            wstatus, waction = update_wrapper_script(
+                opener, crumb_f, crumb_v, name, wrapper_text
+            )
+            if wstatus == 200:
+                print(f"WRAPPER: {name} -> {waction}")
+            else:
+                print(f"FAILED to update wrapper for {name}: HTTP {wstatus} {waction}", file=sys.stderr)
+                sys.exit(1)
+
             status, current = update_mode_choices(opener, crumb_f, crumb_v, name, job["mode_choices"])
             if status == 200:
                 print(f"UPDATED: {name} (MODE = {current})")
@@ -307,9 +368,11 @@ def main():
                     print(f"  FAILED to add string param {name}.{spec['name']}: HTTP {sp_status} {sp_action}", file=sys.stderr)
                     sys.exit(1)
         else:
-            status, body = create_job(opener, crumb_f, crumb_v, name, make_config_xml(job))
+            status, body = create_job(opener, crumb_f, crumb_v, name, make_config_xml(job, wrapper_text))
             if status in (200, 201):
                 print(f"CREATED: {name} (MODE default = {job['mode_choices'][0]})")
+                print(f"  ⚠️  First build will fail with UnapprovedUsageException;")
+                print(f"     go to {JENKINS_URL}scriptApproval and click Approve.")
             else:
                 print(f"FAILED to create {name}: HTTP {status}", file=sys.stderr)
                 print(body, file=sys.stderr)

@@ -17,8 +17,9 @@ This is a Kubernetes-deployable Spring Batch job that soft-deletes unpublished p
 - `k8s/job.yaml` - Kubernetes Job manifest (manual trigger; image is sed-patched by the cd pipeline)
 - `k8s/cronjob.yaml` - Kubernetes CronJob manifest (scheduled daily at midnight)
 - `k8s/secret.yaml.example` - Template for `k8s/secret.yaml` (gitignored)
-- `jenkins/combined-pipeline-scm.groovy` - The single pipeline script (used by all 3 Jenkins jobs)
-- `scripts/jenkins-create-combined-jobs.py` - Idempotent helper to create or refresh the 3 Jenkins jobs
+- `jenkins/combined-pipeline-scm.groovy` - The single pipeline script (used by all 3 Jenkins jobs via `evaluate()` from the wrapper)
+- `jenkins/wrappers/git-fallback-wrapper.groovy` - GitHub→Gitee fallback wrapper embedded in each job config; loads `combined-pipeline-scm.groovy` after a successful git clone
+- `scripts/jenkins-create-combined-jobs.py` - Idempotent helper to create or refresh the 3 Jenkins jobs (uses the wrapper script)
 - `scripts/jenkins-upsert-secret-credential.py` - Idempotent helper to create/rotate Jenkins Secret-text credentials (defaults to `db-password`)
 - `scripts/sql/cleanup-spring-batch-job.sql` - Row-level cleanup of Spring Batch meta state for a single job (parameterized by `:job_name`); safe to run in a shared cluster — leaves other jobs' rows and the schema itself untouched
 - `scripts/lib-local.sh` - Shared helper sourced by every E2E script: `apply_local_job` does `delete + sed-on-stream + apply` so each script can deploy a locally-built image with optional `ERROR_INJECTION_*` env overrides; the file is never mutated (`sed -i` is gone)
@@ -53,9 +54,74 @@ JENKINS_USER=… JENKINS_TOKEN=… ./scripts/verify-e2e.sh  # confirm the chain 
 
 ### Jenkins jobs
 
-All three jobs are **Pipeline script from SCM** pointing at
-`jenkins/combined-pipeline-scm.groovy`. Any edit to that file is
-picked up on the next build with no manual sync.
+The three jobs (`spring-batch-cleanup-job-ci`, `-cd`, `-cicd`) are
+**Pipeline script** (NOT "from SCM") wrapping
+[`jenkins/wrappers/git-fallback-wrapper.groovy`](jenkins/wrappers/git-fallback-wrapper.groovy).
+
+**Why not "Pipeline from SCM"?** When Jenkins loads a pipeline from
+SCM, it has to fetch the Jenkinsfile from GitHub at job-start time.
+If GitHub is down, the pipeline can't even start — there's no chance
+to fall back. The wrapper inverts this: it runs as a Groovy script
+embedded directly in the job config, tries to `git clone` the repo
+from GitHub first (30s timeout), and falls back to Gitee (SSH) on
+failure. After the checkout, it `evaluate()`s the real pipeline
+script at `jenkins/combined-pipeline-scm.groovy` from the workspace.
+
+**Three things the wrapper handles that naive "Pipeline from SCM"
+can't:**
+
+1. **GitHub→Gitee fallback** — `git clone` with timeout, then
+   fallback to `git@gitee.com:zdry146/spring-batch-cleanup-job.git`.
+   The fallback uses SSH key `~/.ssh/gitee_key` (separate from
+   `~/.ssh/github_key`) configured in `~/.ssh/config` per-host.
+2. **Move cloned files to workspace root** — inner Jenkinsfile
+   expects `pom.xml` in the workspace root, not a subdirectory.
+   Uses `bash` (not `dash`) and `cp -a .cloned-tmp/. .` to overwrite.
+3. **`agent any` → `agent none` substitution** — without this, the
+   inner pipeline allocates a fresh empty workspace (`cicd@2`),
+   ignoring the wrapper's already-cloned repo. Substituting
+   `agent none` makes the inner stages reuse the outer `node {}`
+   context.
+
+**Script approval caveat:** Whenever the wrapper's text changes
+(e.g. SSH URL, agent substitution logic), Jenkins requires manual
+approval via `/scriptApproval` (UI) before builds will run. The
+Stapler-bound `approveScript` RPC returns HTTP 200 but does NOT
+actually approve — always do this in the UI.
+
+**Reference: bringing up a wrapper-based job on a new host**
+
+```bash
+# 1. Set up SSH keys for GitHub + Gitee on the Jenkins host
+ssh-keygen -t ed25519 -C "openclaw@local" -f ~/.ssh/github_key
+ssh-keygen -t ed25519 -C "openclaw@local-gitee" -f ~/.ssh/gitee_key
+# Paste github_key.pub → github.com/.../keys
+# Paste gitee_key.pub  → gitee.com/.../ssh_keys
+cat >> ~/.ssh/config <<'EOF'
+Host github.com
+    IdentityFile ~/.ssh/github_key
+    User git
+    IdentitiesOnly yes
+Host gitee.com
+    IdentityFile ~/.ssh/gitee_key
+    User git
+    IdentitiesOnly yes
+EOF
+chmod 600 ~/.ssh/config
+
+# 2. Generate the wrapper config XML (script body is in
+#    jenkins/wrappers/git-fallback-wrapper.groovy) and POST to Jenkins
+python3 scripts/jenkins-create-combined-jobs.py
+# That helper creates the job from the wrapper script source.
+
+# 3. Trigger once → approve in UI (one-time per wrapper text change)
+#    Manage Jenkins → In-process Script Approval → Approve
+```
+
+See [`scripts/jenkins-create-combined-jobs.py`](scripts/jenkins-create-combined-jobs.py)
+for the automated job-creation flow that handles the CSRF crumb,
+cookie session, XML escaping, and the wrapper script upload in one
+shot.
 
 | Job | Default `MODE` | Purpose |
 |-----|---------------|---------|
@@ -116,6 +182,21 @@ credentials with the same script.
 There is nothing to sync. Edit `jenkins/combined-pipeline-scm.groovy`,
 commit, push to `main`, and the next build of any of the three jobs
 runs the new script.
+
+### Editing the wrapper
+
+The wrapper at `jenkins/wrappers/git-fallback-wrapper.groovy` is
+embedded in each job's Jenkins config (not fetched from SCM). After
+editing:
+
+1. Run `scripts/jenkins-create-combined-jobs.py` to push the new
+   wrapper into all three job configs.
+2. Trigger one build → the script will fail with
+   `UnapprovedUsageException` until you Approve in
+   `/scriptApproval` (this is a one-time approval per unique script
+   text — see the "Script approval caveat" above).
+3. Re-trigger; subsequent builds run without re-approval until the
+   wrapper text changes again.
 
 ### Job workspace and Docker access
 
