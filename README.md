@@ -207,9 +207,9 @@ The skill's `scripts/detect-env.sh` reports the current state; `setup-env.sh` le
 
 ### One-off CD without rebuilding the image
 
-Use the `spring-batch-cleanup-job-cd` job. It skips the CI stages and
-just deploys. Set `IMAGE_TAG` to either `latest` (default) or a specific
-version tag like `1.0.0`.
+Use `spring-batch-cleanup-job-cicd` with `MODE=cd`. It skips the CI
+stages and just deploys. Set `IMAGE_TAG` to either `latest` (default) or
+a specific version tag like `1.0.0`.
 
 ### Deploying against a different database
 
@@ -223,7 +223,7 @@ Job ended up with the expected `DB_HOST` and `DB_DATABASE`.
 
 ### Just CI (no deploy)
 
-Use the `spring-batch-cleanup-job-ci` job with `MODE=ci`. Useful for
+Use `spring-batch-cleanup-job-cicd` with `MODE=ci`. Useful for
 verifying a build before deciding whether to deploy.
 
 ## Configuration
@@ -387,7 +387,7 @@ kubectl -n batch-jobs delete all --all
 | CD fails at `kubectl apply` | Minikube not running, or no kubeconfig | `kubectl get nodes` from the Jenkins host |
 | Pods stuck in `ImagePullBackOff` | `aliyun-registry-cred` secret missing or wrong | Re-run the cicd job (it recreates the secret) |
 | Manual Job stuck at `:latest` after a deploy | Job pod template frozen by the controller | The cicd job's `Set image tag` stage now delete+recreates it, so this self-heals on the next cicd run |
-| Manual Job in `CrashLoopBackOff` / `BackoffLimitExceeded` on the day the cron already completed | Pre-`CleanupJobRunner` image is deployed | Re-run `spring-batch-cleanup-job-cd` to pull the latest image (the fix lives in `CleanupJobRunner`) |
+| Manual Job in `CrashLoopBackOff` / `BackoffLimitExceeded` on the day the cron already completed | Pre-`CleanupJobRunner` image is deployed | Re-run `spring-batch-cleanup-job-cicd` with `MODE=cd` to pull the latest image (the fix lives in `CleanupJobRunner`) |
 
 ### Reset Spring Batch state for a single job
 

@@ -33,11 +33,13 @@ JENKINS_TOKEN = os.environ["JENKINS_TOKEN"]
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 WRAPPER_PATH = REPO_ROOT / "jenkins" / "wrappers" / "git-fallback-wrapper.groovy"
 
-# Order matters: the first choice is the default in Jenkins.
+# NOTE: 2026-06-28 standalone -ci / -cd jobs were deleted from Jenkins.
+# Only the parameterized -cicd job remains (MODE=ci|cd|both).
+# To re-run CI: jenkins-run-cicd.py with MODE=ci
+# To re-run CD: jenkins-run-cicd.py with MODE=cd
+# To re-run both: jenkins-run-cicd.py with MODE=both
 JOBS = [
-    {"name": "spring-batch-cleanup-job-ci",   "description": "CI: build, test, push image. Pipeline script + GitHub->Gitee wrapper.",          "mode_choices": ["ci",   "cd", "both"]},
-    {"name": "spring-batch-cleanup-job-cd",   "description": "CD: deploy image to k8s. Pipeline script + GitHub->Gitee wrapper.",              "mode_choices": ["cd",   "ci", "both"]},
-    {"name": "spring-batch-cleanup-job-cicd", "description": "Full pipeline: CI then CD in one run. Pipeline script + GitHub->Gitee wrapper.", "mode_choices": ["both", "ci", "cd"]},
+    {"name": "spring-batch-cleanup-job-cicd", "description": "Full pipeline: CI then CD in one run. Pipeline script + GitHub->Gitee wrapper. Set MODE=ci|cd|both to pick stages.", "mode_choices": ["both", "ci", "cd"]},
 ]
 
 

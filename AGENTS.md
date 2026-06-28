@@ -54,9 +54,12 @@ JENKINS_USER=… JENKINS_TOKEN=… ./scripts/verify-e2e.sh  # confirm the chain 
 
 ### Jenkins jobs
 
-The three jobs (`spring-batch-cleanup-job-ci`, `-cd`, `-cicd`) are
-**Pipeline script** (NOT "from SCM") wrapping
+The single job `spring-batch-cleanup-job-cicd` is a **Pipeline script**
+(NOT "from SCM") wrapping
 [`jenkins/wrappers/git-fallback-wrapper.groovy`](jenkins/wrappers/git-fallback-wrapper.groovy).
+It is parameterized with `MODE=ci|cd|both` — pick the stage set per build.
+(Standalone `-ci` / `-cd` jobs were removed 2026-06-28; this job covers
+both via the `MODE` parameter.)
 
 **Why not "Pipeline from SCM"?** When Jenkins loads a pipeline from
 SCM, it has to fetch the Jenkinsfile from GitHub at job-start time.
@@ -125,13 +128,13 @@ shot.
 
 | Job | Default `MODE` | Purpose |
 |-----|---------------|---------|
-| `spring-batch-cleanup-job-ci`   | `ci`   | Build + test + push image |
-| `spring-batch-cleanup-job-cd`   | `cd`   | Deploy image to k8s |
-| `spring-batch-cleanup-job-cicd` | `both` | CI then CD in one run |
+| `spring-batch-cleanup-job-cicd` | `both` | All stages: build + test + push + deploy |
 
-`MODE` choices in the build form: `ci`, `cd`, `both`. When `MODE=both`,
-the tag deployed in CD is the same `IMAGE_VERSION` that CI just pushed
-(read from `pom.xml`).
+`MODE` choices in the build form: `ci`, `cd`, `both`.
+- `MODE=ci`  → Build + test + push image only
+- `MODE=cd`  → Deploy image to k8s only
+- `MODE=both` → CI then CD in one run (default; tag deployed in CD is the
+  same `IMAGE_VERSION` that CI just pushed, read from `pom.xml`)
 
 ### Per-deploy database host and database name
 
