@@ -67,10 +67,54 @@
             <artifactId>h2</artifactId>
             <scope>test</scope>
         </dependency>
+        <!--
+          Test-only: lets BeanGraphDumperTest declare fields annotated with
+          @Inject so the FQN-match branch (javax.inject.Inject /
+          jakarta.inject.Inject) is exercised by the unit test. Production
+          classpath does not see this artifact — BeanGraphDumper itself
+          intentionally avoids a hard dep on either javax/jakarta inject.
+        -->
+        <dependency>
+            <groupId>jakarta.inject</groupId>
+            <artifactId>jakarta.inject-api</artifactId>
+            <version>2.0.1</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
         <plugins>
+            <!--
+              JaCoCo coverage: prepare-agent attaches the runtime agent
+              to the Surefire JVM, the report goal produces an XML report
+              at target/site/jacoco/jacoco.xml on `mvn verify`. SonarQube
+              picks that report up via the default `sonar.coverage.jacoco.
+              xmlReportPaths` location, so the new-code coverage metric
+              (Sonar way quality gate threshold: 80%) is computed from it.
+              Skipped when the `e2e` profile is active (e2e runs the
+              integration tests under Docker/kubectl, not the unit-test
+              JVM that JaCoCo instruments).
+            -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.13</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
