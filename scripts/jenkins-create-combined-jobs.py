@@ -117,7 +117,7 @@ def make_config_xml(job, wrapper_text):
         <hudson.model.StringParameterDefinition>
           <name>DB_HOST</name>
           <description>PostgreSQL host (cluster-reachable IP/hostname) injected into both manifests as the DB_HOST env var (cd mode only).</description>
-          <defaultValue>192.168.126.133</defaultValue>
+          <defaultValue>host.minikube.internal</defaultValue>
           <trim>false</trim>
         </hudson.model.StringParameterDefinition>
         <hudson.model.StringParameterDefinition>
@@ -261,7 +261,7 @@ def update_wrapper_script(opener, crumb_f, crumb_v, name, wrapper_text):
 EXPECTED_STRING_PARAMS = (
     {
         "name": "DB_HOST",
-        "default": "192.168.126.133",
+        "default": "host.minikube.internal",
         "description": (
             "PostgreSQL host (cluster-reachable IP/hostname) injected into "
             "both manifests as the DB_HOST env var (cd mode only)."
