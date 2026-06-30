@@ -23,7 +23,7 @@ fi
 NAMESPACE="batch-jobs"
 JOB_NAME="cleanup-manual"
 LOCAL_IMAGE="${LOCAL_IMAGE:-cleanup-batch:1.0.0}"
-DB_HOST="${DB_HOST:-192.168.232.128}"
+DB_HOST="${DB_HOST:-localhost}"
 DB_DATABASE="${DB_DATABASE:-testdb}"
 DB_USERNAME="${DB_USERNAME:-postgres}"
 : "${DB_PASSWORD:?DB_PASSWORD must be set, e.g. 'export DB_PASSWORD=...' or create .env from .env.example}"

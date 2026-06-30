@@ -147,8 +147,9 @@ Pre-reqs (one-time per machine):
 - `docker` (the local daemon builds the image)
 - `kubectl` (configured to talk to a cluster — minikube, kind, or a
   remote one)
-- A Postgres reachable from the cluster's pods (this project assumes
-  `192.168.232.128:5432/testdb`; override via `.env`)
+- A Postgres reachable from the cluster's pods (default
+  `localhost:5432/testdb`; override via `.env` or build-time `DB_HOST`
+  parameter)
 
 ```bash
 # One-time cluster prep
@@ -213,7 +214,7 @@ a specific version tag like `1.0.0`.
 
 ### Deploying against a different database
 
-The `DB_HOST` (string, default `192.168.126.133`) and `DB_DATABASE`
+The `DB_HOST` (string, default `localhost`) and `DB_DATABASE`
 (string, default `testdb`) build parameters are sed-substituted into
 the `__DB_HOST__` and `__DB_DATABASE__` placeholders in both
 `k8s/cronjob.yaml` and `k8s/job.yaml` at apply time, so the same
@@ -232,7 +233,7 @@ verifying a build before deciding whether to deploy.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DB_HOST` | `192.168.232.128` | PostgreSQL host |
+| `DB_HOST` | `localhost` | PostgreSQL host |
 | `DB_DATABASE` | `testdb` | Database name |
 | `DB_USERNAME` | `postgres` | Database user |
 | `DB_PASSWORD` | (required) | Database password (never hardcoded; see below) |

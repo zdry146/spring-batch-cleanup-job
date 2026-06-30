@@ -25,7 +25,7 @@ pipeline {
         )
         string(
             name: 'DB_HOST',
-            defaultValue: '192.168.232.128',
+            defaultValue: 'localhost',
             description: 'PostgreSQL host (cluster-reachable IP/hostname) injected into both manifests as the DB_HOST env var (cd mode only).'
         )
         string(
@@ -64,7 +64,7 @@ pipeline {
                         '''
                         // ---- Quality Gate check (webhook-based) ----
                         // SonarQube has a webhook registered pointing to
-                        // http://192.168.232.128:8080/sonarqube-webhook/.
+                        // http://<jenkins-host>:8080/sonarqube-webhook/.
                         //
                         // waitForQualityGate() must be called OUTSIDE the
                         // withSonarQubeEnv block: SonarBuildWrapper's

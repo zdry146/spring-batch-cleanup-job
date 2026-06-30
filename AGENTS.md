@@ -44,7 +44,7 @@ JENKINS_USER=… JENKINS_TOKEN=… ./scripts/setup-env.sh   # detect → prompt 
 JENKINS_USER=… JENKINS_TOKEN=… ./scripts/verify-e2e.sh  # confirm the chain works
 ```
 
-`/home/openclaw/start-jenkins.sh` (mentioned at the end of this section) is the project's specific deployed instance of the skill's `scripts/start-jenkins.sh` pattern.
+`start-jenkins.sh` at the user's home directory (mentioned at the end of this section) is the project's specific deployed instance of the skill's `scripts/start-jenkins.sh` pattern.
 
 | Setting | Value |
 |---------|-------|
@@ -138,7 +138,7 @@ shot.
 
 ### Per-deploy database host and database name
 
-`DB_HOST` (string, default `192.168.126.133`) and `DB_DATABASE`
+`DB_HOST` (string, default `localhost`) and `DB_DATABASE`
 (string, default `testdb`) are both build parameters. The CD pipeline
 sed-substitutes the `__DB_HOST__` and `__DB_DATABASE__` placeholders
 in `k8s/cronjob.yaml` and `k8s/job.yaml` with these values at apply
@@ -203,7 +203,7 @@ editing:
 
 ### Job workspace and Docker access
 
-The Jenkins container is started by `/home/openclaw/start-jenkins.sh`,
+The Jenkins container is started by the home-directory `start-jenkins.sh`,
 which binds the host's `docker.sock` and adds the host's `docker` group
 to the container (gid resolved at start time, so it survives future
 host gid changes). This is what lets the `ci` and `both` modes run
@@ -213,7 +213,7 @@ host gid changes). This is what lets the `ci` and `both` modes run
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| DB_HOST | 192.168.232.128 (local e2e scripts) / 192.168.126.133 (Jenkins CD build param default) | PostgreSQL host; the Jenkins `DB_HOST` build parameter is sed-substituted into `k8s/cronjob.yaml` and `k8s/job.yaml` at deploy time, and `apply_local_job` accepts a 5th positional arg to override it for local E2E |
+| DB_HOST | localhost (local e2e scripts + Jenkins CD build param default + Spring `${DB_HOST:localhost}` fallback in `src/main/resources/application.yml`) | PostgreSQL host; the Jenkins `DB_HOST` build parameter is sed-substituted into `k8s/cronjob.yaml` and `k8s/job.yaml` at deploy time, and `apply_local_job` accepts a 5th positional arg to override it for local E2E |
 | DB_DATABASE | testdb (matches `${DB_DATABASE:testdb}` in `src/main/resources/application.yml`) | PostgreSQL database name; the Jenkins `DB_DATABASE` build parameter is sed-substituted into both manifests at deploy time, and `apply_local_job` accepts a 6th positional arg to override it for local E2E |
 | DB_USERNAME | postgres | Database user |
 | DB_PASSWORD | (required, never committed) | Database password — local scripts auto-load `.env` (gitignored, copy from `.env.example`) or `DB_PASSWORD` from the shell, and fail-fast otherwise; Jenkins reads from the `db-password` credential; k8s reads from the `db-credentials` Secret |
